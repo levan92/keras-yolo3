@@ -202,10 +202,12 @@ class YOLO(object):
 
             box = out_boxes[i]
             top, left, bottom, right = box
-            top = max(0, np.floor(top + 0.5).astype('int32'))
-            left = max(0, np.floor(left + 0.5).astype('int32'))
-            bottom = min(image.size[1], np.floor(bottom + 0.5).astype('int32'))
-            right = min(image.size[0], np.floor(right + 0.5).astype('int32'))
+            width_buf = (right - left) * buffer
+            height_buf = (bottom - top) * buffer
+            top = max(0, np.floor(top + 0.5 - height_buf).astype('int32'))
+            left = max(0, np.floor(left + 0.5 - width_buf).astype('int32'))
+            bottom = min(image.size[1], np.floor(bottom + 0.5 + height_buf).astype('int32'))
+            right = min(image.size[0], np.floor(right + 0.5 + width_buf).astype('int32'))
 
             dets.append( (predicted_class, score, (top, left, bottom, right)) )
 
