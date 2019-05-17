@@ -11,21 +11,24 @@ import numpy as np
 from keras import backend as K
 from keras.models import load_model
 from keras.layers import Input
+from keras.utils import multi_gpu_model
 from PIL import Image, ImageFont, ImageDraw
 
-from yolo3.model import yolo_eval, yolo_body, tiny_yolo_body
-from yolo3.utils import letterbox_image
-import os
-from keras.utils import multi_gpu_model
+if __name__ == '__main__':
+    from yolo3.model import yolo_eval, yolo_body, tiny_yolo_body
+    from yolo3.utils import letterbox_image
+else:
+    from .yolo3.model import yolo_eval, yolo_body, tiny_yolo_body
+    from .yolo3.utils import letterbox_image
 
 class YOLO(object):
     _defaults = {
-        "model_path": 'model_data/yolo.h5',
-        "anchors_path": 'model_data/yolo_anchors.txt',
-        "classes_path": 'model_data/coco_classes.txt',
+        "model_path": 'kerasyolo/model_data/yolo.h5',
+        "anchors_path": 'kerasyolo/model_data/yolo_anchors.txt',
+        "classes_path": 'kerasyolo/model_data/coco_classes.txt',
         "score" : 0.3,
         "iou" : 0.45,
-        "model_image_size" : (416, 416),
+        "model_image_size" : (608, 608),
         "gpu_num" : 1,
     }
 
@@ -36,13 +39,14 @@ class YOLO(object):
         else:
             return "Unrecognized attribute name '" + n + "'"
 
-    def __init__(self, **kwargs):
+    def __init__(self, threshold, **kwargs):
         self.__dict__.update(self._defaults) # set up default values
         self.__dict__.update(kwargs) # and update with user overrides
         self.class_names = self._get_class()
         self.anchors = self._get_anchors()
         self.sess = K.get_session()
         self.boxes, self.scores, self.classes = self.generate()
+        self.threshold = threshold
 
     def _get_class(self):
         classes_path = os.path.expanduser(self.classes_path)
@@ -165,6 +169,47 @@ class YOLO(object):
         end = timer()
         print(end - start)
         return image
+
+    def detect_persons(self, image, buffer=0.1):
+        if self.model_image_size != (None, None):
+            assert self.model_image_size[0]%32 == 0, 'Multiples of 32 required'
+            assert self.model_image_size[1]%32 == 0, 'Multiples of 32 required'
+            boxed_image = letterbox_image(image, tuple(reversed(self.model_image_size)))
+        else:
+            new_image_size = (image.width - (image.width % 32),
+                              image.height - (image.height % 32))
+            boxed_image = letterbox_image(image, new_image_size)
+        image_data = np.array(boxed_image, dtype='float32')
+
+        image_data /= 255.
+        image_data = np.expand_dims(image_data, 0)  # Add batch dimension.
+
+        out_boxes, out_scores, out_classes = self.sess.run(
+            [self.boxes, self.scores, self.classes],
+            feed_dict={
+                self.yolo_model.input: image_data,
+                self.input_image_shape: [image.size[1], image.size[0]],
+                K.learning_phase(): 0
+            })
+
+        dets = []
+
+        for i, c in reversed(list(enumerate(out_classes))):
+            predicted_class = self.class_names[c]
+            score = out_scores[i]
+            if predicted_class != 'person' or score < self.threshold:
+                continue
+
+            box = out_boxes[i]
+            top, left, bottom, right = box
+            top = max(0, np.floor(top + 0.5).astype('int32'))
+            left = max(0, np.floor(left + 0.5).astype('int32'))
+            bottom = min(image.size[1], np.floor(bottom + 0.5).astype('int32'))
+            right = min(image.size[0], np.floor(right + 0.5).astype('int32'))
+
+            dets.append( (predicted_class, score, (top, left, bottom, right)) )
+
+        return dets
 
     def close_session(self):
         self.sess.close()
