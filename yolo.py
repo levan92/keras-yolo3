@@ -213,6 +213,28 @@ class YOLO(object):
 
         return dets
 
+    def crop_largest_person(self, image, buf=0.1):
+        dets = self.detect_persons(image, buffer=buf)
+        # get the largest detection
+        largest_det = None
+        for _,_,tlbr in dets:
+            if largest_det is None:
+                largest_det = tlbr
+            else:
+                detarea = (tlbr[3]-tlbr[1]) * (tlbr[2]-tlbr[0])
+                ldarea = (largest_det[3]-largest_det[1]) * (largest_det[2]-largest_det[0])
+                if detarea > ldarea:
+                    largest_det = tlbr
+
+        if largest_det is not None:
+            # crop image
+            min_x = largest_det[1]
+            min_y = largest_det[0]
+            max_x = largest_det[3]
+            max_y = largest_det[2]
+            return image.crop( (min_x, min_y, max_x, max_y) )
+        return image
+
     def close_session(self):
         self.sess.close()
 
