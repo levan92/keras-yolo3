@@ -54,6 +54,8 @@ class YOLO(object):
         self.anchors = self._get_anchors()
         self.sess = K.get_session()
         self.boxes, self.scores, self.classes = self.generate()
+        warmup_image = Image.fromarray(np.zeros((10,10,3), dtype='uint8'))
+        self.detect(warmup_image)
 
     def _get_class(self):
         classes_path = os.path.expanduser(self.classes_path)
