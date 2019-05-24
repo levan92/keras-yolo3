@@ -14,11 +14,11 @@ from keras.layers import Input
 from keras.utils import multi_gpu_model
 from PIL import Image, ImageFont, ImageDraw
 
-import tensorflow as tf
-config = tf.ConfigProto()
-config.gpu_options.allow_growth=True
-sess = tf.Session(config=config)
-K.set_session(sess)
+# import tensorflow as tf
+# config = tf.ConfigProto()
+# config.gpu_options.allow_growth=True
+# sess = tf.Session(config=config)
+# K.set_session(sess)
 
 if __name__ == '__main__':
     from yolo3.model import yolo_eval, yolo_body, tiny_yolo_body
@@ -27,11 +27,13 @@ else:
     from .yolo3.model import yolo_eval, yolo_body, tiny_yolo_body
     from .yolo3.utils import letterbox_image
 
+KERAS_YOLO_DIR = os.path.dirname(os.path.abspath(__file__))
+
 class YOLO(object):
     _defaults = {
-        "model_path": 'kerasyolo3/model_data/yolo.h5',
-        "anchors_path": 'kerasyolo3/model_data/yolo_anchors.txt',
-        "classes_path": 'kerasyolo3/model_data/coco_classes.txt',
+        "model_path": os.path.join(KERAS_YOLO_DIR, 'model_data/yolov3.h5'),
+        "anchors_path": os.path.join(KERAS_YOLO_DIR, 'model_data/yolo_anchors.txt'),
+        "classes_path": os.path.join(KERAS_YOLO_DIR, 'model_data/coco_classes.txt'),
         "score" : 0.5,
         "iou" : 0.45,
         "model_image_size" : (608, 608),
@@ -50,7 +52,7 @@ class YOLO(object):
         self.__dict__.update(kwargs) # and update with user overrides
         self.class_names = self._get_class()
         self.anchors = self._get_anchors()
-        self.sess = K.get_session()
+        # self.sess = K.get_session()
         self.boxes, self.scores, self.classes = self.generate()
 
     def _get_class(self):
@@ -308,3 +310,5 @@ def detect_video(yolo, video_path, output_path=""):
             break
     yolo.close_session()
 
+if __name__ == '__main__':
+    yolo = YOLO()
