@@ -14,6 +14,12 @@ from keras.layers import Input
 from keras.utils import multi_gpu_model
 from PIL import Image, ImageFont, ImageDraw
 
+import tensorflow as tf
+config = tf.ConfigProto()
+config.gpu_options.allow_growth=True
+sess = tf.Session(config=config)
+K.set_session(sess)
+
 if __name__ == '__main__':
     from yolo3.model import yolo_eval, yolo_body, tiny_yolo_body
     from yolo3.utils import letterbox_image
@@ -23,10 +29,10 @@ else:
 
 class YOLO(object):
     _defaults = {
-        "model_path": 'kerasyolo/model_data/yolo.h5',
-        "anchors_path": 'kerasyolo/model_data/yolo_anchors.txt',
-        "classes_path": 'kerasyolo/model_data/coco_classes.txt',
-        "score" : 0.3,
+        "model_path": 'kerasyolo3/model_data/yolo.h5',
+        "anchors_path": 'kerasyolo3/model_data/yolo_anchors.txt',
+        "classes_path": 'kerasyolo3/model_data/coco_classes.txt',
+        "score" : 0.5,
         "iou" : 0.45,
         "model_image_size" : (608, 608),
         "gpu_num" : 1,
@@ -39,14 +45,13 @@ class YOLO(object):
         else:
             return "Unrecognized attribute name '" + n + "'"
 
-    def __init__(self, threshold, **kwargs):
+    def __init__(self, **kwargs):
         self.__dict__.update(self._defaults) # set up default values
         self.__dict__.update(kwargs) # and update with user overrides
         self.class_names = self._get_class()
         self.anchors = self._get_anchors()
         self.sess = K.get_session()
         self.boxes, self.scores, self.classes = self.generate()
-        self.threshold = threshold
 
     def _get_class(self):
         classes_path = os.path.expanduser(self.classes_path)
@@ -170,7 +175,7 @@ class YOLO(object):
         print(end - start)
         return image
 
-    def detect_persons(self, image, buffer=0.1):
+    def detect(self, image, classes=None, buffer=0.):
         if self.model_image_size != (None, None):
             assert self.model_image_size[0]%32 == 0, 'Multiples of 32 required'
             assert self.model_image_size[1]%32 == 0, 'Multiples of 32 required'
@@ -196,10 +201,10 @@ class YOLO(object):
 
         for i, c in reversed(list(enumerate(out_classes))):
             predicted_class = self.class_names[c]
-            score = out_scores[i]
-            if predicted_class != 'person' or score < self.threshold:
+            if classes is not None and predicted_class not in classes:
                 continue
 
+            score = out_scores[i]
             box = out_boxes[i]
             top, left, bottom, right = box
             width_buf = (right - left) * buffer
@@ -213,8 +218,32 @@ class YOLO(object):
 
         return dets
 
+    # def detect_persons(self, image, classes=None, buf=0.):
+    #     return self.detect( image, classes=['person'], buffer=buf )
+
+    def get_detections_batch(self, frames):
+        all_detections = []
+        for frame in frames:
+            if frame is None:
+                all_detections.append([])
+                continue
+            image = Image.fromarray( frame )
+            dets = self.detect( image, classes=['person'] )
+            curr_detections = []
+            for label, confidence, tlbr in dets:
+                top = tlbr[0]
+                left = tlbr[1]
+                bot = tlbr[2]
+                right = tlbr[3]
+                width = right - left
+                height = bot - top
+                tlwh = {'t':top, 'l':left, 'w':width, 'h':height}
+                curr_detections.append( {'label':label, 'confidence':confidence, 'tlwh':tlwh} )
+            all_detections.append(curr_detections)
+        return all_detections
+
     def crop_largest_person(self, image, buf=0.1):
-        dets = self.detect_persons(image, buffer=buf)
+        dets = self.detect( image, classes=['person'], buffer=buf )
         # get the largest detection
         largest_det = None
         for _,_,tlbr in dets:
