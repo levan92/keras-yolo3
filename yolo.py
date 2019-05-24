@@ -14,11 +14,11 @@ from keras.layers import Input
 from keras.utils import multi_gpu_model
 from PIL import Image, ImageFont, ImageDraw
 
-# import tensorflow as tf
-# config = tf.ConfigProto()
-# config.gpu_options.allow_growth=True
-# sess = tf.Session(config=config)
-# K.set_session(sess)
+import tensorflow as tf
+config = tf.ConfigProto()
+config.gpu_options.allow_growth=True
+sess = tf.Session(config=config)
+K.set_session(sess)
 
 if __name__ == '__main__':
     from yolo3.model import yolo_eval, yolo_body, tiny_yolo_body
@@ -52,7 +52,7 @@ class YOLO(object):
         self.__dict__.update(kwargs) # and update with user overrides
         self.class_names = self._get_class()
         self.anchors = self._get_anchors()
-        # self.sess = K.get_session()
+        self.sess = K.get_session()
         self.boxes, self.scores, self.classes = self.generate()
 
     def _get_class(self):
@@ -220,9 +220,15 @@ class YOLO(object):
 
         return dets
 
+    def detect_path(self, path, classes=None):
+        img = cv2.imread(path)
+        dets = self.detect(img, classes=classes)
+        return dets
+
     # def detect_persons(self, image, classes=None, buf=0.):
     #     return self.detect( image, classes=['person'], buffer=buf )
 
+    # for reid
     def get_detections_batch(self, frames):
         all_detections = []
         for frame in frames:
@@ -311,4 +317,17 @@ def detect_video(yolo, video_path, output_path=""):
     yolo.close_session()
 
 if __name__ == '__main__':
+    import cv2
     yolo = YOLO()
+    # img = cv2.imread('/home/levan/Pictures/auba.jpg')
+    # image = Image.fromarray( img )
+
+    image = Image.open('/home/levan/Pictures/auba.jpg')
+    iw, ih = image.size
+    print(iw,ih)
+
+    yolo.detect(image)
+    # boxes, scores, classes = yolo.generate()
+    # print(boxes)
+    # print(scores)
+    # print(classes)
