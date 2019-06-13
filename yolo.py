@@ -31,7 +31,9 @@ KERAS_YOLO_DIR = os.path.dirname(os.path.abspath(__file__))
 
 class YOLO(object):
     _defaults = {
+        # "model_path": os.path.join(KERAS_YOLO_DIR, 'model_data/yolov3-tiny.h5'),
         "model_path": os.path.join(KERAS_YOLO_DIR, 'model_data/yolov3.h5'),
+        # "anchors_path": os.path.join(KERAS_YOLO_DIR, 'model_data/tiny_yolo_anchors.txt'),
         "anchors_path": os.path.join(KERAS_YOLO_DIR, 'model_data/yolo_anchors.txt'),
         "classes_path": os.path.join(KERAS_YOLO_DIR, 'model_data/coco_classes.txt'),
         "score" : 0.5,
@@ -230,7 +232,27 @@ class YOLO(object):
     # def detect_persons(self, image, classes=None, buf=0.):
     #     return self.detect( image, classes=['person'], buffer=buf )
 
-    # for reid
+    def get_detections(self, frame, classes=None):
+        '''
+        Params: frame, np array
+        Returns: detections, list of dict, whose key: label, confidence, t, l, w, h
+        '''
+        if frame is None:
+            return None
+        image = Image.fromarray( frame )
+        dets = self.detect( image, classes=classes )
+        detections = []
+        for label, confidence, tlbr in dets:
+            top = tlbr[0]
+            left = tlbr[1]
+            bot = tlbr[2]
+            right = tlbr[3]
+            width = right - left
+            height = bot - top
+            detections.append( {'label':label,'confidence':confidence,'t':top,'l':left,'b':bot,'r':right,'w':width,'h':height} ) 
+        return detections
+
+    # for reid PERSON ONLY
     def get_detections_batch(self, frames):
         all_detections = []
         for frame in frames:
