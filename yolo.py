@@ -13,12 +13,7 @@ from keras.models import load_model
 from keras.layers import Input
 from keras.utils import multi_gpu_model
 from PIL import Image, ImageFont, ImageDraw
-
 import tensorflow as tf
-config = tf.ConfigProto()
-config.gpu_options.allow_growth=True
-sess = tf.Session(config=config)
-K.set_session(sess)
 
 if __name__ == '__main__':
     from yolo3.model import yolo_eval, yolo_body, tiny_yolo_body
@@ -49,11 +44,17 @@ class YOLO(object):
         else:
             return "Unrecognized attribute name '" + n + "'"
 
-    def __init__(self, **kwargs):
+    def __init__(self, gpu_usage = 0.5, **kwargs):
         self.__dict__.update(self._defaults) # set up default values
         self.__dict__.update(kwargs) # and update with user overrides
         self.class_names = self._get_class()
         self.anchors = self._get_anchors()
+        # config = tf.ConfigProto()
+        # config.gpu_options.allow_growth=True
+        # config.gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_usage)
+        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_usage)
+        sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+        K.set_session(sess)
         self.sess = K.get_session()
         self.boxes, self.scores, self.classes = self.generate()
         warmup_image = Image.fromarray(np.zeros((10,10,3), dtype='uint8'))
@@ -224,6 +225,65 @@ class YOLO(object):
 
         return dets
 
+    def detect_ltwh(self, np_image, classes=None, buffer=0.):
+        '''
+        detect method
+
+        Params
+        ------
+        np_image : ndarray
+
+        Returns
+        ------
+        list of triples ([left, top, width, height], score, predicted_class)
+
+        '''
+        image = Image.fromarray(np_image)
+        if self.model_image_size != (None, None):
+            assert self.model_image_size[0]%32 == 0, 'Multiples of 32 required'
+            assert self.model_image_size[1]%32 == 0, 'Multiples of 32 required'
+            boxed_image = letterbox_image(image, tuple(reversed(self.model_image_size)))
+        else:
+            new_image_size = (image.width - (image.width % 32),
+                              image.height - (image.height % 32))
+            boxed_image = letterbox_image(image, new_image_size)
+        image_data = np.array(boxed_image, dtype='float32')
+
+        image_data /= 255.
+        image_data = np.expand_dims(image_data, 0)  # Add batch dimension.
+
+        out_boxes, out_scores, out_classes = self.sess.run(
+            [self.boxes, self.scores, self.classes],
+            feed_dict={
+                self.yolo_model.input: image_data,
+                self.input_image_shape: [image.size[1], image.size[0]],
+                K.learning_phase(): 0
+            })
+
+        dets = []
+
+        for i, c in reversed(list(enumerate(out_classes))):
+            predicted_class = self.class_names[c]
+            if classes is not None and predicted_class not in classes:
+                continue
+
+            score = out_scores[i]
+            box = out_boxes[i]
+            top, left, bottom, right = box
+            width = right - left + 1
+            height = bottom - top + 1
+            width_buf = (width) * buffer
+            height_buf = (height) * buffer
+            top = max(0, np.floor(top + 0.5 - height_buf).astype('int32'))
+            left = max(0, np.floor(left + 0.5 - width_buf).astype('int32'))
+            bottom = min(image.size[1], np.floor(bottom + 0.5 + height_buf).astype('int32'))
+            right = min(image.size[0], np.floor(right + 0.5 + width_buf).astype('int32'))
+
+            dets.append( ([left, top, width, height], score, predicted_class) )
+
+        return dets
+
+
     def detect_path(self, path, classes=None):
         img = cv2.imread(path)
         dets = self.detect(img, classes=classes)
@@ -251,6 +311,34 @@ class YOLO(object):
             height = bot - top
             detections.append( {'label':label,'confidence':confidence,'t':top,'l':left,'b':bot,'r':right,'w':width,'h':height} ) 
         return detections
+
+    def get_triple_detections(self, frame, classes=None):
+        '''
+        Params
+        ------
+        frame : np array
+        
+        Returns
+        ------
+        list
+            List of triples ( [left,top,w,h] , confidence, detection_class)
+
+        '''
+        if frame is None:
+            return None
+        image = Image.fromarray( frame )
+        dets = self.detect( image, classes=classes )
+        detections = []
+        for label, confidence, tlbr in dets:
+            top = tlbr[0]
+            left = tlbr[1]
+            bot = tlbr[2]
+            right = tlbr[3]
+            width = right - left
+            height = bot - top
+            detections.append( ([left, top, width, height], confidence, label) ) 
+        return detections
+
 
     # for reid PERSON ONLY
     def get_detections_batch(self, frames):
@@ -295,6 +383,21 @@ class YOLO(object):
             max_y = largest_det[2]
             return image.crop( (min_x, min_y, max_x, max_y) )
         return image
+
+    def get_largest_person(self, np_image, buf=0.1):
+        # image = Image.fromarray(np_image)
+        dets = self.detect_ltwh( np_image, classes=['person'], buffer=buf )
+        # get the largest detection
+        largest_det = None
+        for det in dets:
+            if largest_det is None:
+                largest_det = det
+            else:
+                detarea = det[0][2] * det[0][3]
+                ldarea = largest_det[0][2] * largest_det[0][3]
+                if detarea > ldarea:
+                    largest_det = det
+        return largest_det
 
     def get_largest_person_and_bb(self, np_image, buf=0.1):
         image = Image.fromarray(np_image)
