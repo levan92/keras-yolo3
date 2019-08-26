@@ -27,10 +27,12 @@ KERAS_YOLO_DIR = os.path.dirname(os.path.abspath(__file__))
 class YOLO(object):
     _defaults = {
         # "model_path": os.path.join(KERAS_YOLO_DIR, 'model_data/yolov3-tiny.h5'),
-        "model_path": os.path.join(KERAS_YOLO_DIR, 'model_data/yolov3.h5'),
+        # "model_path": os.path.join(KERAS_YOLO_DIR, 'model_data/pp_reanchored_best_train.h5'),
+        "model_path": os.path.join(KERAS_YOLO_DIR, 'model_data/pp_reanchored_best_val.h5'),
         # "anchors_path": os.path.join(KERAS_YOLO_DIR, 'model_data/tiny_yolo_anchors.txt'),
-        "anchors_path": os.path.join(KERAS_YOLO_DIR, 'model_data/yolo_anchors.txt'),
-        "classes_path": os.path.join(KERAS_YOLO_DIR, 'model_data/coco_classes.txt'),
+        "anchors_path": os.path.join(KERAS_YOLO_DIR, 'model_data/PP_ALL_anchors.txt'),
+        # "anchors_path": os.path.join(KERAS_YOLO_DIR, 'model_data/yolo_anchors.txt'),
+        "classes_path": os.path.join(KERAS_YOLO_DIR, 'model_data/PP_classes.txt'),
         "score" : 0.5,
         "iou" : 0.45,
         "model_image_size" : (608, 608),
