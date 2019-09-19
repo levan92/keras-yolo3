@@ -267,27 +267,31 @@ class YOLO(object):
             box = out_boxes[i]
 
             top, left, bottom, right = box
-            width_buf = (right - left) * buffer
-            height_buf = (bottom - top) * buffer
-            top = max(0, np.floor(top + 0.5 - height_buf).astype('int32'))
-            left = max(0, np.floor(left + 0.5 - width_buf).astype('int32'))
-            bottom = min(image.shape[0], np.floor(bottom + 0.5 + height_buf).astype('int32'))
-            right = min(image.shape[1], np.floor(right + 0.5 + width_buf).astype('int32'))
+
+            width = right - left + 1
+            height = bottom - top + 1
+            width_buffer = width * buffer
+            height_buffer = height * buffer
+            
+            top = max( 0.0, top-0.5*height_buffer )
+            left = max( 0.0, left-0.5*width_buffer )
+            bottom = min( image.shape[0]-1.0, bottom + 0.5*height_buffer )
+            right = min( image.shape[1]-1.0, right + 0.5*width_buffer )
 
             box_infos = []
             for c in box_format:
                 if c == 't':
-                    box_infos.append(top)
+                    box_infos.append(round(top))
                 elif c == 'l':
-                    box_infos.append(left)
+                    box_infos.append(round(left))
                 elif c == 'b':
-                    box_infos.append(bottom)
+                    box_infos.append(round(bottom))
                 elif c == 'r':
-                    box_infos.append(right)
+                    box_infos.append(round(right))
                 elif c == 'w':
-                    box_infos.append(width_buf)
+                    box_infos.append(round(width+width_buffer))
                 elif c == 'h':
-                    box_infos.append(height_buf)
+                    box_infos.append(round(height+height_buffer))
                 else:
                     assert False,'box_format given in detect unrecognised!'
             assert len(box_infos) > 0 ,'box infos is blank'
