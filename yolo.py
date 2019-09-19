@@ -49,17 +49,21 @@ class YOLO(object):
         else:
             return "Unrecognized attribute name '" + n + "'"
 
-    def __init__(self, bgr, gpu_usage = 0.5, **kwargs):
+    def __init__(self, bgr, pillow=False, gpu_usage = 0.5, **kwargs):
         '''
         Params
         ------
-        bgr: Boolean signifying if the inputs is bgr or rgb (if you're using cv2.imread it's probably in BGR) 
+        - bgr: Boolean, signifying if the inputs is bgr or rgb (if you're using cv2.imread it's probably in BGR) 
+        - pillow : Boolean, flag to give inputs in pillow format instead of ndarray-like, this will override bgr flag to False
         '''
         self.__dict__.update(self._defaults) # set up default values
         self.__dict__.update(kwargs) # and update with user overrides
         self.class_names = self._get_class()
         self.anchors = self._get_anchors()
         self.bgr = bgr
+        self.pillow = pillow
+        if self.pillow:
+            self.bgr = False
         # config = tf.ConfigProto()
         # config.gpu_options.allow_growth=True
         # config.gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_usage)
@@ -194,20 +198,21 @@ class YOLO(object):
     #     print(end - start)
     #     return image
 
-    def preprocess(self, image):
+    def _preprocess(self, image):
         '''
         Params
         ------
-        image : ndarray-like
+        image : ndarray-like or PIL image (in that case, self.pillow better be True)
 
         Returns
         -------
         ndarray-like
         '''
 
-        if self.bgr:
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        image = Image.fromarray( image )
+        if not self.pillow:
+            if self.bgr: image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            image = Image.fromarray( image )
+        
         if self.model_image_size != (None, None):
             assert self.model_image_size[0]%32 == 0, 'Multiples of 32 required'
             assert self.model_image_size[1]%32 == 0, 'Multiples of 32 required'
@@ -223,20 +228,8 @@ class YOLO(object):
 
         return image_data
 
-    def detect(self, image, classes=None, buffer=0.):
-        # if self.model_image_size != (None, None):
-        #     assert self.model_image_size[0]%32 == 0, 'Multiples of 32 required'
-        #     assert self.model_image_size[1]%32 == 0, 'Multiples of 32 required'
-        #     boxed_image = letterbox_image(image, tuple(reversed(self.model_image_size)))
-        # else:
-        #     new_image_size = (image.width - (image.width % 32),
-        #                       image.height - (image.height % 32))
-        #     boxed_image = letterbox_image(image, new_image_size)
-        # image_data = np.array(boxed_image, dtype='float32')
-
-        # image_data /= 255.
-        # image_data = np.expand_dims(image_data, 0)  # Add batch dimension.
-        image_data = self.preprocess(image)
+    def _detect(self, image):
+        image_data = self._preprocess(image)
         out_boxes, out_scores, out_classes = self.sess.run(
             [self.boxes, self.scores, self.classes],
             feed_dict={
@@ -244,32 +237,67 @@ class YOLO(object):
                 self.input_image_shape: [image.shape[0], image.shape[1]], # height, width
                 K.learning_phase(): 0
             })
+        return out_boxes, out_scores, out_classes
 
+    def detect_get_box_in(self, image, box_format='ltrb', classes=None, buffer=0.):
+        '''
+        Params
+        ------
+        - image : ndarray-like
+        - box_format : string of characters representing format order, where l = left, t = top, r = right, b = bottom, w = width and h = height
+        - classes : list of string, classes to focus on
+        - buffer : float, proportion of buffer around the width and height of the bounding box
+
+        Returns
+        -------
+        a list of tuple (box_infos, score, predicted_class)
+        where,
+            - box_infos : list of floats in the given box format
+            - score : float, confidence level of prediction
+            - predicted_class : string
+
+        '''
+        out_boxes, out_scores, out_classes = self._detect(image)
         dets = []
-
         for i, c in reversed(list(enumerate(out_classes))):
             predicted_class = self.class_names[c]
             if classes is not None and predicted_class not in classes:
                 continue
-
             score = out_scores[i]
             box = out_boxes[i]
+
             top, left, bottom, right = box
             width_buf = (right - left) * buffer
             height_buf = (bottom - top) * buffer
             top = max(0, np.floor(top + 0.5 - height_buf).astype('int32'))
             left = max(0, np.floor(left + 0.5 - width_buf).astype('int32'))
-
             bottom = min(image.shape[0], np.floor(bottom + 0.5 + height_buf).astype('int32'))
             right = min(image.shape[1], np.floor(right + 0.5 + width_buf).astype('int32'))
-            # bottom = min(image.size[1], np.floor(bottom + 0.5 + height_buf).astype('int32'))
-            # right = min(image.size[0], np.floor(right + 0.5 + width_buf).astype('int32'))
 
-            dets.append( (predicted_class, score, (top, left, bottom, right)) )
+            box_infos = []
+            for c in box_format:
+                if c == 't':
+                    box_infos.append(top)
+                elif c == 'l':
+                    box_infos.append(left)
+                elif c == 'b':
+                    box_infos.append(bottom)
+                elif c == 'r':
+                    box_infos.append(right)
+                elif c == 'w':
+                    box_infos.append(width_buf)
+                elif c == 'h':
+                    box_infos.append(height_buf)
+                else:
+                    assert False,'box_format given in detect unrecognised!'
+            assert len(box_infos) > 0 ,'box infos is blank'
 
+            dets.append( (box_infos, score, predicted_class) )
+            # dets.append((top, left, bottom, right) (predicted_class, score, ) )
         return dets
 
     def detect_ltwh(self, np_image, classes=None, buffer=0.):
+        raise Exception('This method has been deprecated, please use detect_get_box_in for a more general method.')
         '''
         detect method
 
@@ -305,42 +333,44 @@ class YOLO(object):
         #         K.learning_phase(): 0
         #     })
 
-        image_data = self.preprocess(image)
-        out_boxes, out_scores, out_classes = self.sess.run(
-            [self.boxes, self.scores, self.classes],
-            feed_dict={
-                self.yolo_model.input: image_data,
-                self.input_image_shape: [image_data.shape[0], image_data.shape[1]], # height, width
-                K.learning_phase(): 0
-            })
+        # image_data = self.preprocess(image)
+        # out_boxes, out_scores, out_classes = self.sess.run(
+        #     [self.boxes, self.scores, self.classes],
+        #     feed_dict={
+        #         self.yolo_model.input: image_data,
+        #         self.input_image_shape: [image_data.shape[0], image_data.shape[1]], # height, width
+        #         K.learning_phase(): 0
+        #     })
 
-        dets = []
+        # dets = []
 
-        for i, c in reversed(list(enumerate(out_classes))):
-            predicted_class = self.class_names[c]
-            if classes is not None and predicted_class not in classes:
-                continue
+        # for i, c in reversed(list(enumerate(out_classes))):
+        #     predicted_class = self.class_names[c]
+        #     if classes is not None and predicted_class not in classes:
+        #         continue
 
-            score = out_scores[i]
-            box = out_boxes[i]
-            top, left, bottom, right = box
-            width = right - left + 1
-            height = bottom - top + 1
-            width_buf = (width) * buffer
-            height_buf = (height) * buffer
-            top = max(0, np.floor(top + 0.5 - height_buf).astype('int32'))
-            left = max(0, np.floor(left + 0.5 - width_buf).astype('int32'))
-            bottom = min(image.size[1], np.floor(bottom + 0.5 + height_buf).astype('int32'))
-            right = min(image.size[0], np.floor(right + 0.5 + width_buf).astype('int32'))
+        #     score = out_scores[i]
+        #     box = out_boxes[i]
+        #     top, left, bottom, right = box
+        #     width = right - left + 1
+        #     height = bottom - top + 1
+        #     width_buf = (width) * buffer
+        #     height_buf = (height) * buffer
+        #     top = max(0, np.floor(top + 0.5 - height_buf).astype('int32'))
+        #     left = max(0, np.floor(left + 0.5 - width_buf).astype('int32'))
+        #     bottom = min(image.size[1], np.floor(bottom + 0.5 + height_buf).astype('int32'))
+        #     right = min(image.size[0], np.floor(right + 0.5 + width_buf).astype('int32'))
 
-            dets.append( ([left, top, width, height], score, predicted_class) )
+        #     dets.append( ([left, top, width, height], score, predicted_class) )
 
-        return dets
+        # return dets
 
-
-    def detect_path(self, path, classes=None):
+    def detect_path(self, path, box_format='ltrb', classes=None):
         img = cv2.imread(path)
-        dets = self.detect(img, classes=classes)
+        assert self.pillow == False,'Please initialise this object with pillow = False'
+        assert self.bgr == True,'Please initialise this object with bgr = True'
+        # print('WARNING: pillow set to False and bgr set to True, do not use this yolo object for anything else.')
+        dets = self.detect_get_box_in(img, box_format='ltrb', classes=classes)
         return dets
 
     # def detect_persons(self, image, classes=None, buf=0.):
@@ -355,127 +385,132 @@ class YOLO(object):
             return None
         # image = Image.fromarray( frame )
         # image = self.preprocess(frame)
-        dets = self.detect( frame, classes=classes )
+        dets = self.detect_get_box_in( frame, box_format='tlbrwh', classes=classes )
         detections = []
-        for label, confidence, tlbr in dets:
-            top = tlbr[0]
-            left = tlbr[1]
-            bot = tlbr[2]
-            right = tlbr[3]
-            width = right - left
-            height = bot - top
+        for tlbrwh,confidence,label  in dets:
+            top, left, bot, right, width, height = tlbrwh
+            # left = tlbr[1]
+            # bot = tlbr[2]
+            # right = tlbr[3]
+            # width = right - left
+            # height = bot - top
             detections.append( {'label':label,'confidence':confidence,'t':top,'l':left,'b':bot,'r':right,'w':width,'h':height} ) 
         return detections
 
     def get_triple_detections(self, frame, classes=None):
-        '''
-        Params
-        ------
-        frame : np array
+        raise Exception('this method has been deprecated, please use detect_get_box_in for a more general method.')
+        # '''
+        # Params
+        # ------
+        # frame : np array
         
-        Returns
-        ------
-        list
-            List of triples ( [left,top,w,h] , confidence, detection_class)
+        # Returns
+        # ------
+        # list
+        #     List of triples ( [left,top,w,h] , confidence, detection_class)
 
-        '''
-        if frame is None:
-            return None
-        image = Image.fromarray( frame )
-        dets = self.detect( image, classes=classes )
-        detections = []
-        for label, confidence, tlbr in dets:
-            top = tlbr[0]
-            left = tlbr[1]
-            bot = tlbr[2]
-            right = tlbr[3]
-            width = right - left
-            height = bot - top
+        # '''
+        # if frame is None:
+        #     return None
+        # image = Image.fromarray( frame )
+        # dets = self.detect( image, classes=classes )
+        # detections = []
+        # for label, confidence, tlbr in dets:
+        #     top = tlbr[0]
+        #     left = tlbr[1]
+        #     bot = tlbr[2]
+        #     right = tlbr[3]
+        #     width = right - left
+        #     height = bot - top
             detections.append( ([left, top, width, height], confidence, label) ) 
-        return detections
-
+        # return detections
 
     # for reid PERSON ONLY
     def get_detections_batch(self, frames):
+        # TODO: BATCH INFER THIS SHIT
         all_detections = []
         for frame in frames:
             if frame is None:
                 all_detections.append([])
                 continue
-            image = Image.fromarray( frame )
-            dets = self.detect( image, classes=['person'] )
-            curr_detections = []
-            for label, confidence, tlbr in dets:
-                top = tlbr[0]
-                left = tlbr[1]
-                bot = tlbr[2]
-                right = tlbr[3]
-                width = right - left
-                height = bot - top
-                tlwh = {'t':top, 'l':left, 'w':width, 'h':height}
-                curr_detections.append( {'label':label, 'confidence':confidence, 'tlwh':tlwh} )
+            curr_detections = self.get_detections_dict(image, classes=['person'])
+            # image = Image.fromarray( frame )
+            # dets = self.detect_get_box_in( image,  classes=['person'] )
+            # curr_detections = []
+            # for label, confidence, tlbr in dets:
+            #     top = tlbr[0]
+            #     left = tlbr[1]
+            #     bot = tlbr[2]
+            #     right = tlbr[3]
+            #     width = right - left
+            #     height = bot - top
+            #     tlwh = {'t':top, 'l':left, 'w':width, 'h':height}
+            #     curr_detections.append( {'label':label, 'confidence':confidence, 'tlwh':tlwh} )
             all_detections.append(curr_detections)
         return all_detections
 
     def crop_largest_person(self, image, buf=0.1):
-        dets = self.detect( image, classes=['person'], buffer=buf )
-        # get the largest detection
-        largest_det = None
-        for _,_,tlbr in dets:
-            if largest_det is None:
-                largest_det = tlbr
-            else:
-                detarea = (tlbr[3]-tlbr[1]) * (tlbr[2]-tlbr[0])
-                ldarea = (largest_det[3]-largest_det[1]) * (largest_det[2]-largest_det[0])
-                if detarea > ldarea:
-                    largest_det = tlbr
+        raise Exception('this method has been deprecated, please use detect_get_box_in for a more general method.')
+        # dets = self.detect( image, classes=['person'], buffer=buf )
+        # # get the largest detection
+        # largest_det = None
+        # for _,_,tlbr in dets:
+        #     if largest_det is None:
+        #         largest_det = tlbr
+        #     else:
+        #         detarea = (tlbr[3]-tlbr[1]) * (tlbr[2]-tlbr[0])
+        #         ldarea = (largest_det[3]-largest_det[1]) * (largest_det[2]-largest_det[0])
+        #         if detarea > ldarea:
+        #             largest_det = tlbr
 
-        if largest_det is not None:
-            # crop image
-            min_x = largest_det[1]
-            min_y = largest_det[0]
-            max_x = largest_det[3]
-            max_y = largest_det[2]
-            return image.crop( (min_x, min_y, max_x, max_y) )
-        return image
+        # if largest_det is not None:
+        #     # crop image
+        #     min_x = largest_det[1]
+        #     min_y = largest_det[0]
+        #     max_x = largest_det[3]
+        #     max_y = largest_det[2]
+        #     return image.crop( (min_x, min_y, max_x, max_y) )
+        # return image
 
     def get_largest_person(self, np_image, buf=0.1):
-        # image = Image.fromarray(np_image)
-        dets = self.detect_ltwh( np_image, classes=['person'], buffer=buf )
-        # get the largest detection
-        largest_det = None
-        for det in dets:
-            if largest_det is None:
-                largest_det = det
-            else:
-                detarea = det[0][2] * det[0][3]
-                ldarea = largest_det[0][2] * largest_det[0][3]
-                if detarea > ldarea:
-                    largest_det = det
-        return largest_det
+        raise Exception('this method has been deprecated, please use detect_get_box_in for a more general method.')
+        # # image = Image.fromarray(np_image)
+        # dets = self.detect_ltwh( np_image, classes=['person'], buffer=buf )
+        # # get the largest detection
+        # largest_det = None
+        # for det in dets:
+        #     if largest_det is None:
+        #         largest_det = det
+        #     else:
+        #         detarea = det[0][2] * det[0][3]
+        #         ldarea = largest_det[0][2] * largest_det[0][3]
+        #         if detarea > ldarea:
+        #             largest_det = det
+        # return largest_det
 
     def get_largest_person_and_bb(self, np_image, buf=0.1):
-        image = Image.fromarray(np_image)
-        dets = self.detect( image, classes=['person'], buffer=buf )
-        # get the largest detection
-        largest_det = None
-        for _,_,tlbr in dets:
-            if largest_det is None:
-                largest_det = tlbr
-            else:
-                detarea = (tlbr[3]-tlbr[1]) * (tlbr[2]-tlbr[0])
-                ldarea = (largest_det[3]-largest_det[1]) * (largest_det[2]-largest_det[0])
-                if detarea > ldarea:
-                    largest_det = tlbr
+        raise Exception('this method has been deprecated, please use detect_get_box_in for a more general method.')
+        # image = Image.fromarray(np_image)
+        # dets = self.detect( image, classes=['person'], buffer=buf )
+        # # get the largest detection
+        # largest_det = None
+        # for _,_,tlbr in dets:
+        #     if largest_det is None:
+        #         largest_det = tlbr
+        #     else:
+        #         detarea = (tlbr[3]-tlbr[1]) * (tlbr[2]-tlbr[0])
+        #         ldarea = (largest_det[3]-largest_det[1]) * (largest_det[2]-largest_det[0])
+        #         if detarea > ldarea:
+        #             largest_det = tlbr
 
-        if largest_det is not None:
-            # crop image
-            min_x = largest_det[1]
-            min_y = largest_det[0]
-            max_x = largest_det[3]
-            max_y = largest_det[2]
-            return np.array(image.crop( (min_x, min_y, max_x, max_y) )), largest_det
-        return None, None
+        # if largest_det is not None:
+        #     # crop image
+        #     min_x = largest_det[1]
+        #     min_y = largest_det[0]
+        #     max_x = largest_det[3]
+        #     max_y = largest_det[2]
+        #     return np.array(image.crop( (min_x, min_y, max_x, max_y) )), largest_det
+        # return None, None
 
     def close_session(self):
         self.sess.close()
