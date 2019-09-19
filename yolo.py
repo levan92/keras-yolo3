@@ -74,7 +74,7 @@ class YOLO(object):
         self.boxes, self.scores, self.classes = self.generate()
         warmup_image = np.zeros((10,10,3), dtype='uint8')
         # warmup_image = Image.fromarray(np.zeros((10,10,3), dtype='uint8'))
-        self.detect(warmup_image)
+        self._detect(warmup_image)
 
     def _get_class(self):
         classes_path = os.path.expanduser(self.classes_path)
@@ -422,7 +422,7 @@ class YOLO(object):
         #     right = tlbr[3]
         #     width = right - left
         #     height = bot - top
-            detections.append( ([left, top, width, height], confidence, label) ) 
+        #     detections.append( ([left, top, width, height], confidence, label) ) 
         # return detections
 
     # for reid PERSON ONLY
