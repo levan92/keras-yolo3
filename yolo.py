@@ -16,7 +16,9 @@ from keras.utils import multi_gpu_model
 from PIL import Image, ImageFont, ImageDraw
 import tensorflow as tf
 
-if __name__ == '__main__':
+THIS_DIR = os.path.dirname(os.path.realpath(__file__))
+CWD = os.getcwd()
+if CWD == THIS_DIR:
     from yolo3.model import yolo_eval, yolo_eval_batch, yolo_body, tiny_yolo_body
     from yolo3.utils import letterbox_image
 else:
@@ -628,15 +630,16 @@ def detect_video(yolo, video_path, output_path=""):
 
 if __name__ == '__main__':
     import cv2
-    yolo = YOLO(bgr=True, batch_size=3)
+    yolo = YOLO(bgr=True, batch_size=1)
     img = cv2.imread('/home/dh/Pictures/frisbee.jpg')
     img2 = cv2.imread('/home/dh/Pictures/dog_two.jpg')
     img2 = cv2.resize(img2, (img.shape[1], img.shape[0]))
     img3 = cv2.imread('/home/dh/Pictures/puppy-dog.jpg')
     img3 = cv2.resize(img3, (img.shape[1], img.shape[0]))
 
+    img_batch = [img]
     # img_batch = [img, img2]
-    img_batch = [img, img2, img3]
+    # img_batch = [img, img2, img3]
 
     all_dets = yolo.detect_get_box_in(img_batch, box_format='ltrb')
     # boxes, scores, classes = yolo._detect_batch(img_batch)
