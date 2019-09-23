@@ -17,10 +17,10 @@ from PIL import Image, ImageFont, ImageDraw
 import tensorflow as tf
 
 if __name__ == '__main__':
-    from yolo3.model import yolo_eval, yolo_body, tiny_yolo_body
+    from yolo3.model import yolo_eval, yolo_eval_batch, yolo_body, tiny_yolo_body
     from yolo3.utils import letterbox_image
 else:
-    from .yolo3.model import yolo_eval, yolo_body, tiny_yolo_body
+    from .yolo3.model import yolo_eval, yolo_eval_batch, yolo_body, tiny_yolo_body
     from .yolo3.utils import letterbox_image
 
 KERAS_YOLO_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -40,6 +40,7 @@ class YOLO(object):
         "iou" : 0.45,
         "model_image_size" : (608, 608),
         "gpu_num" : 1,
+        "batch_size" : 1,
     }
 
     @classmethod
@@ -72,9 +73,14 @@ class YOLO(object):
         K.set_session(sess)
         self.sess = K.get_session()
         self.boxes, self.scores, self.classes = self.generate()
+        # self.boxes, self.scores, self.classes = self.generate()
         warmup_image = np.zeros((10,10,3), dtype='uint8')
         # warmup_image = Image.fromarray(np.zeros((10,10,3), dtype='uint8'))
-        self._detect(warmup_image)
+        # self._detect(warmup_image)
+        # self._detect([warmup_image, warmup_image])
+        print('Warming up...')
+        self._detect_batch([warmup_image] * self.batch_size)
+        print('YOLO warmed up!')
 
     def _get_class(self):
         classes_path = os.path.expanduser(self.classes_path)
@@ -126,10 +132,19 @@ class YOLO(object):
         self.input_image_shape = K.placeholder(shape=(2, ))
         if self.gpu_num>=2:
             self.yolo_model = multi_gpu_model(self.yolo_model, gpus=self.gpu_num)
-        boxes, scores, classes = yolo_eval(self.yolo_model.output, self.anchors,
-                len(self.class_names), self.input_image_shape,
+
+        # boxes, scores, classes = yolo_eval_batch(self.yolo_model.output, self.anchors,
+        #         len(self.class_names), self.input_image_shape, batch_size=2,
+        #         score_threshold=self.score, iou_threshold=self.iou)
+        # boxes, scores, classes = yolo_eval(self.yolo_model.output, self.anchors,
+        #         len(self.class_names), self.input_image_shape,
+        #         score_threshold=self.score, iou_threshold=self.iou)
+
+        boxes, scores, classes = yolo_eval_batch(self.yolo_model.output, self.anchors,
+                len(self.class_names), self.input_image_shape, self.batch_size,
                 score_threshold=self.score, iou_threshold=self.iou)
         return boxes, scores, classes
+        # return boxes, scores, classes
 
     # def detect_image(self, image):
     #     start = timer()
@@ -198,11 +213,12 @@ class YOLO(object):
     #     print(end - start)
     #     return image
 
-    def _preprocess(self, image):
+    def _preprocess(self, image, expand=True):
         '''
         Params
         ------
         image : ndarray-like or PIL image (in that case, self.pillow better be True)
+        expand : Boolean, usually True for single image cases
 
         Returns
         -------
@@ -224,81 +240,131 @@ class YOLO(object):
         image_data = np.array(boxed_image, dtype='float32')
 
         image_data /= 255.
-        image_data = np.expand_dims(image_data, 0)  # Add batch dimension.
-
+        if expand:
+            image_data = np.expand_dims(image_data, 0)  # Add batch dimension.
         return image_data
 
     def _detect(self, image):
         image_data = self._preprocess(image)
-        out_boxes, out_scores, out_classes = self.sess.run(
-            [self.boxes, self.scores, self.classes],
+        out_boxes, out_scores, = self.sess.run(
+            [self.boxes, self.scores],
+            # [self.boxes, self.scores, self.classes],
             feed_dict={
                 self.yolo_model.input: image_data,
                 self.input_image_shape: [image.shape[0], image.shape[1]], # height, width
                 K.learning_phase(): 0
             })
-        return out_boxes, out_scores, out_classes
+        # return out_boxes, out_scores, out_classes
+        return out_boxes, out_scores
 
-    def detect_get_box_in(self, image, box_format='ltrb', classes=None, buffer=0.):
+    def _preprocess_batch(self, images):
+        # images_data = np.array( [self._preprocess(image) for image in images] )
+        images_data = np.zeros((len(images),*self.model_image_size,images[0].shape[-1]))
+        for i, image in enumerate(images):
+            images_data[i] = self._preprocess( image, expand=False )
+        return images_data
+
+    def _detect_batch(self, images):
+        '''
+        detect function 
+
+        Params
+        ------
+        images : list of ndarrays
+
+        '''
+        if len( images ) <= 0:
+            return None
+        assert all([images[0].shape == img.shape for img in images[1:]]),'Network does not acccept images of different sizes. please speak to eugene.'
+        assert len(images) == self.batch_size,'Length of image batch given ({}) different from what network was initialised as ({}).'.format(len(images), self.batch_size)
+        images_data = self._preprocess_batch(images)
+        out_boxes, out_scores, out_classes = self.sess.run(
+        # out_boxes, out_scores, out_classes = self.sess.run(
+            # [],
+            [self.boxes, self.scores, self.classes],
+            # [self.boxes, self.scores, self.classes],
+            feed_dict={
+                self.yolo_model.input: images_data,
+                self.input_image_shape: [images[0].shape[0], images[0].shape[1]], # height, width
+                K.learning_phase(): 0
+            })
+        return out_boxes, out_scores, out_classes
+        # return out_boxes, out_scores, out_classes
+
+    def detect_get_box_in(self, images, box_format='ltrb', classes=None, buffer_ratio=0.):
         '''
         Params
         ------
-        - image : ndarray-like
+        - images : ndarray-like or list of ndarray-like
         - box_format : string of characters representing format order, where l = left, t = top, r = right, b = bottom, w = width and h = height
         - classes : list of string, classes to focus on
         - buffer : float, proportion of buffer around the width and height of the bounding box
 
         Returns
         -------
-        a list of tuple (box_infos, score, predicted_class)
+        a list (batch) of a list (boxes in one image) of tuple (box_infos, score, predicted_class)
         where,
             - box_infos : list of floats in the given box format
             - score : float, confidence level of prediction
             - predicted_class : string
 
         '''
-        out_boxes, out_scores, out_classes = self._detect(image)
-        dets = []
-        for i, c in reversed(list(enumerate(out_classes))):
-            predicted_class = self.class_names[c]
-            if classes is not None and predicted_class not in classes:
-                continue
-            score = out_scores[i]
-            box = out_boxes[i]
+        
+        if isinstance(images, list):
+            if len(images) <= 0 : 
+                return None
+            else:
+                assert isinstance(images[0], np.ndarray)
+                assert all([images[0].shape == img.shape for img in images[1:]]),'Network does not acccept images of different sizes. please speak to eugene.'
+        elif isinstance(images, np.ndarray):
+            images = [ images ]
+        im_height, im_width = images[0].shape[:2]
+        all_out_boxes, all_out_scores, all_out_classes = self._detect_batch(images)
 
-            top, left, bottom, right = box
+        all_dets = []
+        for out_boxes, out_scores, out_classes in zip(all_out_boxes, all_out_scores, all_out_classes):
+            dets = []
+            for i, c in reversed(list(enumerate(out_classes))):
+                predicted_class = self.class_names[c]
+                if classes is not None and predicted_class not in classes:
+                    continue
+                score = out_scores[i]
+                box = out_boxes[i]
 
-            width = right - left + 1
-            height = bottom - top + 1
-            width_buffer = width * buffer
-            height_buffer = height * buffer
-            
-            top = max( 0.0, top-0.5*height_buffer )
-            left = max( 0.0, left-0.5*width_buffer )
-            bottom = min( image.shape[0]-1.0, bottom + 0.5*height_buffer )
-            right = min( image.shape[1]-1.0, right + 0.5*width_buffer )
+                top, left, bottom, right = box
 
-            box_infos = []
-            for c in box_format:
-                if c == 't':
-                    box_infos.append(round(top))
-                elif c == 'l':
-                    box_infos.append(round(left))
-                elif c == 'b':
-                    box_infos.append(round(bottom))
-                elif c == 'r':
-                    box_infos.append(round(right))
-                elif c == 'w':
-                    box_infos.append(round(width+width_buffer))
-                elif c == 'h':
-                    box_infos.append(round(height+height_buffer))
-                else:
-                    assert False,'box_format given in detect unrecognised!'
-            assert len(box_infos) > 0 ,'box infos is blank'
+                width = right - left + 1
+                height = bottom - top + 1
+                width_buffer = width * buffer_ratio
+                height_buffer = height * buffer_ratio
+                
+                top = max( 0.0, top-0.5*height_buffer )
+                left = max( 0.0, left-0.5*width_buffer )
+                bottom = min( im_height - 1.0, bottom + 0.5*height_buffer )
+                right = min( im_width - 1.0, right + 0.5*width_buffer )
 
-            dets.append( (box_infos, score, predicted_class) )
-            # dets.append((top, left, bottom, right) (predicted_class, score, ) )
-        return dets
+                box_infos = []
+                for c in box_format:
+                    if c == 't':
+                        box_infos.append( int(round(top)) ) 
+                    elif c == 'l':
+                        box_infos.append( int(round(left)) )
+                    elif c == 'b':
+                        box_infos.append( int(round(bottom)) )
+                    elif c == 'r':
+                        box_infos.append( int(round(right)) )
+                    elif c == 'w':
+                        box_infos.append( int(round(width+width_buffer)) )
+                    elif c == 'h':
+                        box_infos.append( int(round(height+height_buffer)) )
+                    else:
+                        assert False,'box_format given in detect unrecognised!'
+                assert len(box_infos) > 0 ,'box infos is blank'
+
+                dets.append( (box_infos, score, predicted_class) )
+                # dets.append((top, left, bottom, right) (predicted_class, score, ) )
+            all_dets.append(dets)
+        return all_dets
 
     def detect_ltwh(self, np_image, classes=None, buffer=0.):
         raise Exception('This method has been deprecated, please use detect_get_box_in for a more general method.')
@@ -374,13 +440,13 @@ class YOLO(object):
         assert self.pillow == False,'Please initialise this object with pillow = False'
         assert self.bgr == True,'Please initialise this object with bgr = True'
         # print('WARNING: pillow set to False and bgr set to True, do not use this yolo object for anything else.')
-        dets = self.detect_get_box_in(img, box_format='ltrb', classes=classes)
+        dets = self.detect_get_box_in(img, box_format='ltrb', classes=classes)[0]
         return dets
 
     # def detect_persons(self, image, classes=None, buf=0.):
     #     return self.detect( image, classes=['person'], buffer=buf )
 
-    def get_detections_dict(self, frame, classes=None):
+    def get_detections_dict(self, frame, classes=None, buffer_ratio=0.0):
         '''
         Params: frame, np array
         Returns: detections, list of dict, whose key: label, confidence, t, l, w, h
@@ -389,7 +455,7 @@ class YOLO(object):
             return None
         # image = Image.fromarray( frame )
         # image = self.preprocess(frame)
-        dets = self.detect_get_box_in( frame, box_format='tlbrwh', classes=classes )
+        dets = self.detect_get_box_in( frame, box_format='tlbrwh', classes=classes, buffer_ratio=buffer_ratio )[0]
         detections = []
         for tlbrwh,confidence,label  in dets:
             top, left, bot, right, width, height = tlbrwh
@@ -437,7 +503,7 @@ class YOLO(object):
             if frame is None:
                 all_detections.append([])
                 continue
-            curr_detections = self.get_detections_dict(image, classes=['person'])
+            curr_detections = self.get_detections_dict(frame, classes=['person'])
             # image = Image.fromarray( frame )
             # dets = self.detect_get_box_in( image,  classes=['person'] )
             # curr_detections = []
@@ -562,16 +628,45 @@ def detect_video(yolo, video_path, output_path=""):
 
 if __name__ == '__main__':
     import cv2
-    yolo = YOLO()
-    # img = cv2.imread('/home/levan/Pictures/auba.jpg')
-    # image = Image.fromarray( img )
+    yolo = YOLO(bgr=True, batch_size=3)
+    img = cv2.imread('/home/dh/Pictures/frisbee.jpg')
+    img2 = cv2.imread('/home/dh/Pictures/dog_two.jpg')
+    img2 = cv2.resize(img2, (img.shape[1], img.shape[0]))
+    img3 = cv2.imread('/home/dh/Pictures/puppy-dog.jpg')
+    img3 = cv2.resize(img3, (img.shape[1], img.shape[0]))
 
-    image = Image.open('/home/levan/Pictures/auba.jpg')
-    iw, ih = image.size
-    print(iw,ih)
+    # img_batch = [img, img2]
+    img_batch = [img, img2, img3]
 
-    yolo.detect(image)
-    # boxes, scores, classes = yolo.generate()
-    # print(boxes)
-    # print(scores)
-    # print(classes)
+    all_dets = yolo.detect_get_box_in(img_batch, box_format='ltrb')
+    # boxes, scores, classes = yolo._detect_batch(img_batch)
+    for dets, im in zip(all_dets, img_batch):
+        for det in dets:
+            # print(det)
+            ltrb, conf, clsname = det
+            l,t,r,b = ltrb
+            cv2.rectangle(im, (int(l),int(t)),(int(r),int(b)), (255,255,0))
+            print('{}:{}'.format(clsname, conf))
+        cv2.imshow('',im)
+        cv2.waitKey(0)
+
+
+    # for b,s,c, im in zip(boxes, scores, classes, img_batch):
+        
+    #     for box in b:
+    #         t,l,b,r = box
+    #         cv2.rectangle(im, (int(l),int(t)),(int(r),int(b)), (255,255,0))
+    #     cv2.imshow('',im)
+    #     cv2.waitKey(0)
+
+    # print(a,b,c)
+    # print(a.shape,b.shape,c.shape)
+    # a,b,c = yolo._detect(img)
+    # print(a,b,c)
+    # print(a.shape,b.shape,c.shape)
+    # a,b,c = yolo._detect(img2)
+    # print(a,b,c)
+    # print(a.shape,b.shape,c.shape)
+    # a,b,c = yolo._detect(img3)
+    # print(a,b,c)
+    # print(a.shape,b.shape,c.shape)
