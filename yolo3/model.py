@@ -182,20 +182,26 @@ def yolo_correct_boxes(box_xy, box_wh, input_shape, image_shape):
 def yolo_boxes_and_scores(feats, anchors, num_classes, input_shape, image_shape, batch_size):
     '''Process Conv layer output'''
     box_xy, box_wh, box_confidence, box_class_probs = yolo_head(feats,
-        anchors, num_classes, input_shape, batch_size)
+        anchors, num_classes, input_shape)
     boxes = yolo_correct_boxes(box_xy, box_wh, input_shape, image_shape)
     
     # boxes = K.reshape(boxes, [-1, 4])
 
     # I want to preserve batch integrity here
+    # if batch_size > 1:
     boxes = K.reshape(boxes, [batch_size, -1, 4])
+    # else:
+        # boxes = K.reshape(boxes, [-1, 4])
 
     box_scores = box_confidence * box_class_probs
     # This is the step which reshapes [batch_size, featshape1, featshape2, num_anchors, num_classes] to [batch_size * featshape1 * featshape2 * num_anchors, num_classes], thereby losing batch integrity
     # box_scores = K.reshape(box_scores, [-1, num_classes])
 
     # I want to preserve batch integrity here
+    # if batch_size > 1:
     box_scores = K.reshape(box_scores, [batch_size, -1, num_classes])
+    # else:
+        # box_scores = K.reshape(box_scores, [-1, num_classes])
     # box_scores_shape = K.print_tensor(K.shape(box_scores),message='box_scores shape after:')
     # feats_ones = K.ones( box_scores_shape )
     # box_scores = box_scores * feats_ones
