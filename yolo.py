@@ -334,7 +334,10 @@ class YOLO(object):
 
         Returns
         -------
-        a list (batch) of a list (boxes in one image) of tuple (box_infos, score, predicted_class)
+        if one ndarray given, this returns a list (boxes in one image) of tuple (box_infos, score, predicted_class),
+        
+        else if a list of ndarray given, this return a list (batch) containing the former as the elements,
+
         where,
             - box_infos : list of floats in the given box format
             - score : float, confidence level of prediction
@@ -342,6 +345,7 @@ class YOLO(object):
 
         '''
         
+        no_batch = False
         if isinstance(images, list):
             if len(images) <= 0 : 
                 return None
@@ -350,6 +354,7 @@ class YOLO(object):
                 assert all([images[0].shape == img.shape for img in images[1:]]),'Network does not acccept images of different sizes. please speak to eugene.'
         elif isinstance(images, np.ndarray):
             images = [ images ]
+            no_batch = True
         im_height, im_width = images[0].shape[:2]
 
         # import time
@@ -402,7 +407,10 @@ class YOLO(object):
         # tic3 = time.time()
         # print('Batch Forward pass: {}s'.format(tic2 - tic))
         # print('Post proc: {}s'.format(tic3 - tic2))
-        return all_dets
+        if no_batch:
+            return all_dets[0]
+        else:
+            return all_dets
 
     def detect_ltwh(self, np_image, classes=None, buffer=0.):
         raise Exception('This method has been deprecated, please use detect_get_box_in for a more general method.')
