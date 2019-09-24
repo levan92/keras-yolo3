@@ -52,7 +52,7 @@ class YOLO(object):
         else:
             return "Unrecognized attribute name '" + n + "'"
 
-    def __init__(self, bgr, pillow=False, gpu_usage = 0.5, **kwargs):
+    def __init__(self, bgr, pillow=False, gpu_usage = 0.5, old=False, **kwargs):
         '''
         Params
         ------
@@ -74,7 +74,7 @@ class YOLO(object):
         sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
         K.set_session(sess)
         self.sess = K.get_session()
-        self.boxes, self.scores, self.classes = self.generate()
+        self.boxes, self.scores, self.classes = self.generate(old=old)
         # self.boxes, self.scores, self.classes = self.generate()
         warmup_image = np.zeros((10,10,3), dtype='uint8')
         # warmup_image = Image.fromarray(np.zeros((10,10,3), dtype='uint8'))
@@ -98,7 +98,7 @@ class YOLO(object):
         anchors = [float(x) for x in anchors.split(',')]
         return np.array(anchors).reshape(-1, 2)
 
-    def generate(self):
+    def generate(self, old = False):
         model_path = os.path.expanduser(self.model_path)
         assert model_path.endswith('.h5'), 'Keras model or weights must be a .h5 file.'
 
@@ -135,6 +135,38 @@ class YOLO(object):
         if self.gpu_num>=2:
             self.yolo_model = multi_gpu_model(self.yolo_model, gpus=self.gpu_num)
 
+        if old:
+            print('using old yolo eval')
+            boxes, scores, classes = yolo_eval(self.yolo_model.output, self.anchors,
+                    len(self.class_names), self.input_image_shape,
+                    score_threshold=self.score, iou_threshold=self.iou)
+        else:
+            boxes, scores, classes = yolo_eval_batch(self.yolo_model.output, self.anchors,
+                    len(self.class_names), self.input_image_shape, self.batch_size,
+                    score_threshold=self.score, iou_threshold=self.iou)
+        return boxes, scores, classes
+        # return boxes, scores, classes
+
+    def regenerate(self, batch_size):
+        if batch_size == self.batch_size:
+            return
+        self.batch_size = batch_size
+        # Generate colors for drawing bounding boxes.
+        hsv_tuples = [(x / len(self.class_names), 1., 1.)
+                      for x in range(len(self.class_names))]
+        self.colors = list(map(lambda x: colorsys.hsv_to_rgb(*x), hsv_tuples))
+        self.colors = list(
+            map(lambda x: (int(x[0] * 255), int(x[1] * 255), int(x[2] * 255)),
+                self.colors))
+        np.random.seed(10101)  # Fixed seed for consistent colors across runs.
+        np.random.shuffle(self.colors)  # Shuffle colors to decorrelate adjacent classes.
+        np.random.seed(None)  # Reset seed to default.
+
+        # Generate output tensor targets for filtered bounding boxes.
+        self.input_image_shape = K.placeholder(shape=(2, ))
+        if self.gpu_num>=2:
+            self.yolo_model = multi_gpu_model(self.yolo_model, gpus=self.gpu_num)
+
         # boxes, scores, classes = yolo_eval_batch(self.yolo_model.output, self.anchors,
         #         len(self.class_names), self.input_image_shape, batch_size=2,
         #         score_threshold=self.score, iou_threshold=self.iou)
@@ -142,11 +174,14 @@ class YOLO(object):
         #         len(self.class_names), self.input_image_shape,
         #         score_threshold=self.score, iou_threshold=self.iou)
 
-        boxes, scores, classes = yolo_eval_batch(self.yolo_model.output, self.anchors,
+        self.boxes, self.scores, self.classes = yolo_eval_batch(self.yolo_model.output, self.anchors,
                 len(self.class_names), self.input_image_shape, self.batch_size,
                 score_threshold=self.score, iou_threshold=self.iou)
-        return boxes, scores, classes
-        # return boxes, scores, classes
+
+        warmup_image = np.zeros((10,10,3), dtype='uint8')
+        print('Warming up...')
+        self._detect_batch([warmup_image] * self.batch_size)
+        print('YOLO warmed up!')
 
     # def detect_image(self, image):
     #     start = timer()
@@ -248,16 +283,14 @@ class YOLO(object):
 
     def _detect(self, image):
         image_data = self._preprocess(image)
-        out_boxes, out_scores, = self.sess.run(
-            [self.boxes, self.scores],
-            # [self.boxes, self.scores, self.classes],
+        out_boxes, out_scores, out_classes = self.sess.run(
+            [self.boxes, self.scores, self.classes],
             feed_dict={
                 self.yolo_model.input: image_data,
                 self.input_image_shape: [image.shape[0], image.shape[1]], # height, width
                 K.learning_phase(): 0
             })
-        # return out_boxes, out_scores, out_classes
-        return out_boxes, out_scores
+        return out_boxes, out_scores, out_classes
 
     def _preprocess_batch(self, images):
         # images_data = np.array( [self._preprocess(image) for image in images] )
@@ -281,10 +314,7 @@ class YOLO(object):
         assert len(images) == self.batch_size,'Length of image batch given ({}) different from what network was initialised as ({}).'.format(len(images), self.batch_size)
         images_data = self._preprocess_batch(images)
         out_boxes, out_scores, out_classes = self.sess.run(
-        # out_boxes, out_scores, out_classes = self.sess.run(
-            # [],
             [self.boxes, self.scores, self.classes],
-            # [self.boxes, self.scores, self.classes],
             feed_dict={
                 self.yolo_model.input: images_data,
                 self.input_image_shape: [images[0].shape[0], images[0].shape[1]], # height, width
@@ -321,8 +351,11 @@ class YOLO(object):
         elif isinstance(images, np.ndarray):
             images = [ images ]
         im_height, im_width = images[0].shape[:2]
-        all_out_boxes, all_out_scores, all_out_classes = self._detect_batch(images)
 
+        # import time
+        # tic = time.time()
+        all_out_boxes, all_out_scores, all_out_classes = self._detect_batch(images)
+        # tic2 = time.time()
         all_dets = []
         for out_boxes, out_scores, out_classes in zip(all_out_boxes, all_out_scores, all_out_classes):
             dets = []
@@ -366,6 +399,9 @@ class YOLO(object):
                 dets.append( (box_infos, score, predicted_class) )
                 # dets.append((top, left, bottom, right) (predicted_class, score, ) )
             all_dets.append(dets)
+        # tic3 = time.time()
+        # print('Batch Forward pass: {}s'.format(tic2 - tic))
+        # print('Post proc: {}s'.format(tic3 - tic2))
         return all_dets
 
     def detect_ltwh(self, np_image, classes=None, buffer=0.):
@@ -644,14 +680,32 @@ if __name__ == '__main__':
     all_dets = yolo.detect_get_box_in(img_batch, box_format='ltrb')
     # boxes, scores, classes = yolo._detect_batch(img_batch)
     for dets, im in zip(all_dets, img_batch):
+        im_show = im.copy()
         for det in dets:
             # print(det)
             ltrb, conf, clsname = det
             l,t,r,b = ltrb
-            cv2.rectangle(im, (int(l),int(t)),(int(r),int(b)), (255,255,0))
+            cv2.rectangle(im_show, (int(l),int(t)),(int(r),int(b)), (255,255,0))
             print('{}:{}'.format(clsname, conf))
-        cv2.imshow('',im)
+        cv2.imshow('',im_show)
         cv2.waitKey(0)
+    cv2.destroyAllWindows()
+    print('REDO with diff batch size')
+
+    img_batch = [img, img2, img3]
+    yolo.regenerate(batch_size=len(img_batch))
+    all_dets = yolo.detect_get_box_in(img_batch, box_format='ltrb')
+    for dets, im in zip(all_dets, img_batch):
+        im_show = im.copy()
+        for det in dets:
+            # print(det)
+            ltrb, conf, clsname = det
+            l,t,r,b = ltrb
+            cv2.rectangle(im_show, (int(l),int(t)),(int(r),int(b)), (255,255,0))
+            print('{}:{}'.format(clsname, conf))
+        cv2.imshow('',im_show)
+        cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
 
     # for b,s,c, im in zip(boxes, scores, classes, img_batch):
