@@ -56,8 +56,9 @@ class YOLO(object):
         '''
         Params
         ------
-        - bgr: Boolean, signifying if the inputs is bgr or rgb (if you're using cv2.imread it's probably in BGR) 
+        - bgr : Boolean, signifying if the inputs is bgr or rgb (if you're using cv2.imread it's probably in BGR) 
         - pillow : Boolean, flag to give inputs in pillow format instead of ndarray-like, this will override bgr flag to False
+        - batch_size : int, inference batch size (default = 1)
         '''
         self.__dict__.update(self._defaults) # set up default values
         self.__dict__.update(kwargs) # and update with user overrides
@@ -310,7 +311,7 @@ class YOLO(object):
         '''
         if len( images ) <= 0:
             return None
-        assert all([images[0].shape == img.shape for img in images[1:]]),'Network does not acccept images of different sizes. please speak to eugene.'
+        # assert all([images[0].shape == img.shape for img in images[1:]]),'Network does not acccept images of different sizes. please speak to eugene.'
         assert len(images) == self.batch_size,'Length of image batch given ({}) different from what network was initialised as ({}).'.format(len(images), self.batch_size)
         images_data = self._preprocess_batch(images)
         out_boxes, out_scores, out_classes = self.sess.run(
@@ -351,7 +352,7 @@ class YOLO(object):
                 return None
             else:
                 assert isinstance(images[0], np.ndarray)
-                assert all([images[0].shape == img.shape for img in images[1:]]),'Network does not acccept images of different sizes. please speak to eugene.'
+                # assert all([images[0].shape == img.shape for img in images[1:]]),'Network does not acccept images of different sizes. please speak to eugene.'
         elif isinstance(images, np.ndarray):
             images = [ images ]
             no_batch = True
@@ -486,32 +487,34 @@ class YOLO(object):
         assert self.pillow == False,'Please initialise this object with pillow = False'
         assert self.bgr == True,'Please initialise this object with bgr = True'
         # print('WARNING: pillow set to False and bgr set to True, do not use this yolo object for anything else.')
-        dets = self.detect_get_box_in(img, box_format='ltrb', classes=classes)[0]
+        dets = self.detect_get_box_in(img, box_format='ltrb', classes=classes)
         return dets
 
     # def detect_persons(self, image, classes=None, buf=0.):
     #     return self.detect( image, classes=['person'], buffer=buf )
 
-    def get_detections_dict(self, frame, classes=None, buffer_ratio=0.0):
+    def get_detections_dict(self, frames, classes=None, buffer_ratio=0.0):
         '''
-        Params: frame, np array
+        Params: frames, list of ndarray-like
         Returns: detections, list of dict, whose key: label, confidence, t, l, w, h
         '''
-        if frame is None:
+        if frames is None or len(frames) == 0:
             return None
-        # image = Image.fromarray( frame )
-        # image = self.preprocess(frame)
-        dets = self.detect_get_box_in( frame, box_format='tlbrwh', classes=classes, buffer_ratio=buffer_ratio )[0]
-        detections = []
-        for tlbrwh,confidence,label  in dets:
-            top, left, bot, right, width, height = tlbrwh
-            # left = tlbr[1]
-            # bot = tlbr[2]
-            # right = tlbr[3]
-            # width = right - left
-            # height = bot - top
-            detections.append( {'label':label,'confidence':confidence,'t':top,'l':left,'b':bot,'r':right,'w':width,'h':height} ) 
-        return detections
+        all_dets = self.detect_get_box_in( frames, box_format='tlbrwh', classes=classes, buffer_ratio=buffer_ratio )
+        
+        all_detections = []
+        for dets in all_dets:
+            detections = []
+            for tlbrwh,confidence,label in dets:
+                top, left, bot, right, width, height = tlbrwh
+                # left = tlbr[1]
+                # bot = tlbr[2]
+                # right = tlbr[3]
+                # width = right - left
+                # height = bot - top
+                detections.append( {'label':label,'confidence':confidence,'t':top,'l':left,'b':bot,'r':right,'w':width,'h':height} ) 
+            all_detections.append(detections)
+        return all_detections
 
     def get_triple_detections(self, frame, classes=None):
         raise Exception('this method has been deprecated, please use detect_get_box_in for a more general method.')
