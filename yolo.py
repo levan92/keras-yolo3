@@ -311,7 +311,7 @@ class YOLO(object):
         '''
         if len( images ) <= 0:
             return None
-        # assert all([images[0].shape == img.shape for img in images[1:]]),'Network does not acccept images of different sizes. please speak to eugene.'
+        assert all([images[0].shape == img.shape for img in images[1:]]),'Network does not acccept images of different sizes. please speak to eugene.'
         assert len(images) == self.batch_size,'Length of image batch given ({}) different from what network was initialised as ({}).'.format(len(images), self.batch_size)
         images_data = self._preprocess_batch(images)
         out_boxes, out_scores, out_classes = self.sess.run(
@@ -352,7 +352,7 @@ class YOLO(object):
                 return None
             else:
                 assert isinstance(images[0], np.ndarray)
-                # assert all([images[0].shape == img.shape for img in images[1:]]),'Network does not acccept images of different sizes. please speak to eugene.'
+                assert all([images[0].shape == img.shape for img in images[1:]]),'Network does not acccept images of different sizes. please speak to eugene.'
         elif isinstance(images, np.ndarray):
             images = [ images ]
             no_batch = True
