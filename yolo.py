@@ -41,6 +41,7 @@ class YOLO(object):
         "score" : 0.5,
         "iou" : 0.45,
         "model_image_size" : (608, 608),
+        "input_image_size" : (1080, 1920), # Height, Width
         "gpu_num" : 1,
         "batch_size" : 1,
     }
@@ -84,6 +85,7 @@ class YOLO(object):
         print('Warming up...')
         self._detect_batch([warmup_image] * self.batch_size)
         print('YOLO warmed up!')
+        print('Input image size initialised as {}x{} (WxH)! Please give the appropriate argument inputs if this is wrong.'.format(self.input_image_size[1], self.input_image_size[0]))
 
     def _get_class(self):
         classes_path = os.path.expanduser(self.classes_path)
@@ -148,9 +150,7 @@ class YOLO(object):
         return boxes, scores, classes
         # return boxes, scores, classes
 
-    def regenerate(self, batch_size):
-        if batch_size == self.batch_size:
-            return
+    def _refresh(self, batch_size):
         self.batch_size = batch_size
         # Generate colors for drawing bounding boxes.
         hsv_tuples = [(x / len(self.class_names), 1., 1.)
@@ -179,6 +179,10 @@ class YOLO(object):
                 len(self.class_names), self.input_image_shape, self.batch_size,
                 score_threshold=self.score, iou_threshold=self.iou)
 
+    def regenerate(self, batch_size):
+        if batch_size == self.batch_size:
+            return
+        self._refresh(batch_size)
         warmup_image = np.zeros((10,10,3), dtype='uint8')
         print('Warming up...')
         self._detect_batch([warmup_image] * self.batch_size)
@@ -276,7 +280,6 @@ class YOLO(object):
                               image.height - (image.height % 32))
             boxed_image = letterbox_image(image, new_image_size)
         image_data = np.array(boxed_image, dtype='float32')
-
         image_data /= 255.
         if expand:
             image_data = np.expand_dims(image_data, 0)  # Add batch dimension.
@@ -297,7 +300,8 @@ class YOLO(object):
         # images_data = np.array( [self._preprocess(image) for image in images] )
         images_data = np.zeros((len(images),*self.model_image_size,images[0].shape[-1]))
         for i, image in enumerate(images):
-            images_data[i] = self._preprocess( image, expand=False )
+            if image is not None:
+                images_data[i] = self._preprocess( image, expand=False )
         return images_data
 
     def _detect_batch(self, images):
@@ -311,14 +315,19 @@ class YOLO(object):
         '''
         if len( images ) <= 0:
             return None
-        assert all([images[0].shape == img.shape for img in images[1:]]),'Network does not acccept images of different sizes. please speak to eugene.'
-        assert len(images) == self.batch_size,'Length of image batch given ({}) different from what network was initialised as ({}).'.format(len(images), self.batch_size)
+        # assert all([images[0].shape == img.shape for img in images[1:]]),'Network does not acccept images of different sizes. please speak to evan.'
+
+        assert len(images) <= self.batch_size,'Length of image batch given ({}) is bigger than what network was initialised as ({}).'.format(len(images), self.batch_size)
+        # assert len(images) == self.batch_size,'Length of image batch given ({}) different from what network was initialised as ({}).'.format(len(images), self.batch_size)
+        if len(images) < self.batch_size:
+            images.extend([None]*int(self.batch_size - len(images)))
+        assert len(images) == self.batch_size
         images_data = self._preprocess_batch(images)
         out_boxes, out_scores, out_classes = self.sess.run(
             [self.boxes, self.scores, self.classes],
             feed_dict={
                 self.yolo_model.input: images_data,
-                self.input_image_shape: [images[0].shape[0], images[0].shape[1]], # height, width
+                self.input_image_shape: [self.input_image_size[0], self.input_image_size[1]], # height, width
                 K.learning_phase(): 0
             })
         return out_boxes, out_scores, out_classes
@@ -352,7 +361,9 @@ class YOLO(object):
                 return None
             else:
                 assert isinstance(images[0], np.ndarray)
-                assert all([images[0].shape == img.shape for img in images[1:]]),'Network does not acccept images of different sizes. please speak to eugene.'
+                if all([images[0].shape == img.shape for img in images[1:]]):
+                    print('WARNING from yolo module: Input images in batch are of diff sizes, the input size will take the first image in the batch, you will have to scale the output bounding boxes of those input image whose sizes differ from the first image yourself.')
+                # assert all([images[0].shape == img.shape for img in images[1:]]),'Network does not acccept images of different sizes. please speak to eugene.'
         elif isinstance(images, np.ndarray):
             images = [ images ]
             no_batch = True
@@ -360,7 +371,18 @@ class YOLO(object):
 
         # import time
         # tic = time.time()
-        all_out_boxes, all_out_scores, all_out_classes = self._detect_batch(images)
+        all_out_boxes = []
+        all_out_scores = []
+        all_out_classes = []
+        for i in range( int(np.ceil(len(images)/self.batch_size)) ):
+            from_ = i*self.batch_size
+            to_ = min(len(images),i*self.batch_size+self.batch_size)
+            n = to_ - from_ 
+            print('Inferencing {} images'.format(n))
+            out_boxes, out_scores, out_classes = self._detect_batch(images[from_:to_])
+            all_out_boxes.extend(out_boxes[:n])
+            all_out_scores.extend(out_scores[:n])
+            all_out_classes.extend(out_classes[:n])
         # tic2 = time.time()
         all_dets = []
         for out_boxes, out_scores, out_classes in zip(all_out_boxes, all_out_scores, all_out_classes):
