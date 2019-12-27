@@ -378,7 +378,7 @@ class YOLO(object):
             from_ = i*self.batch_size
             to_ = min(len(images),i*self.batch_size+self.batch_size)
             n = to_ - from_ 
-            print('Inferencing {} images'.format(n))
+            # print('Inferencing {} images'.format(n))
             out_boxes, out_scores, out_classes = self._detect_batch(images[from_:to_])
             all_out_boxes.extend(out_boxes[:n])
             all_out_scores.extend(out_scores[:n])
