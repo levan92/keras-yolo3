@@ -40,7 +40,8 @@ class YOLO(object):
         # "classes_path": os.path.join(KERAS_YOLO_DIR, 'model_data/PP_classes.txt'),
         "score" : 0.5,
         "iou" : 0.45,
-        "model_image_size" : (608, 608),
+        # "model_image_size" : (512, 288), # Width, Height
+        "model_image_size" : (608, 608),# Width, Height
         # "input_image_size" : (1080, 1920), # Height, Width
         "gpu_num" : 1,
         "batch_size" : 1,
@@ -53,13 +54,14 @@ class YOLO(object):
         else:
             return "Unrecognized attribute name '" + n + "'"
 
-    def __init__(self, bgr, pillow=False, gpu_usage = 0.5, old=False, **kwargs):
+    def __init__(self, bgr, pillow=False, gpu_usage = 0.5, old=False, gpu_device='0', **kwargs):
         '''
         Params
         ------
         - bgr : Boolean, signifying if the inputs is bgr or rgb (if you're using cv2.imread it's probably in BGR) 
         - pillow : Boolean, flag to give inputs in pillow format instead of ndarray-like, this will override bgr flag to False
         - batch_size : int, inference batch size (default = 1)
+        - gpu_device : str, string of index of gpu to use, for cpu use empty string
         '''
         self.__dict__.update(self._defaults) # set up default values
         self.__dict__.update(kwargs) # and update with user overrides
@@ -72,11 +74,16 @@ class YOLO(object):
         # config = tf.ConfigProto()
         # config.gpu_options.allow_growth=True
         # config.gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_usage)
+        self.gpu_device = gpu_device
+        os.environ["CUDA_VISIBLE_DEVICES"] = gpu_device
         gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_usage)
         sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
         K.set_session(sess)
         self.sess = K.get_session()
         self.boxes, self.scores, self.classes = self.generate(old=old)
+        self.graph = tf.get_default_graph()
+        print('Keras Yolov3 started at batch size of {} and confidence threshold of {}, using gpu device {}.'.format(self.batch_size, self.score, self.gpu_device))
+        print('Model input size {}'.format(self.model_image_size))
         # self.boxes, self.scores, self.classes = self.generate()
         warmup_image = np.zeros((10,10,3), dtype='uint8')
         # warmup_image = Image.fromarray(np.zeros((10,10,3), dtype='uint8'))
@@ -250,20 +257,21 @@ class YOLO(object):
             return None
         # assert all([images[0].shape == img.shape for img in images[1:]]),'Network does not acccept images of different sizes. please speak to evan.'
 
-        assert len(images) <= self.batch_size,'Length of image batch given ({}) is bigger than what network was initialised as ({}).'.format(len(images), self.batch_size)
+        # assert len(images) <= self.batch_size,'Length of image batch given ({}) is bigger than what network was initialised as ({}).'.format(len(images), self.batch_size)
         # assert len(images) == self.batch_size,'Length of image batch given ({}) different from what network was initialised as ({}).'.format(len(images), self.batch_size)
         if len(images) < self.batch_size:
             images.extend([None]*int(self.batch_size - len(images)))
         assert len(images) == self.batch_size
         images_data = self._preprocess_batch(images)
-        out_boxes, out_scores, out_classes = self.sess.run(
-            [self.boxes, self.scores, self.classes],
-            feed_dict={
-                self.yolo_model.input: images_data,
-                self.input_image_shape: [images[0].shape[0], images[0].shape[1]], # height, width
-                # self.input_image_shape: [self.input_image_size[0], self.input_image_size[1]], # height, width
-                K.learning_phase(): 0
-            })
+        with self.graph.as_default():
+            out_boxes, out_scores, out_classes = self.sess.run(
+                [self.boxes, self.scores, self.classes],
+                feed_dict={
+                    self.yolo_model.input: images_data,
+                    self.input_image_shape: [images[0].shape[0], images[0].shape[1]], # height, width
+                    # self.input_image_shape: [self.input_image_size[0], self.input_image_size[1]], # height, width
+                    K.learning_phase(): 0
+                })
         return out_boxes, out_scores, out_classes
         # return out_boxes, out_scores, out_classes
 
@@ -293,10 +301,10 @@ class YOLO(object):
         if isinstance(images, list):
             if len(images) <= 0 : 
                 return None
-            else:
-                assert isinstance(images[0], np.ndarray)
-                if all([images[0].shape == img.shape for img in images[1:]]):
-                    print('WARNING from yolo module: Input images in batch are of diff sizes, the input size will take the first image in the batch, you will have to scale the output bounding boxes of those input image whose sizes differ from the first image yourself.')
+            # else:
+                # assert isinstance(images[0], np.ndarray)
+                # if all([images[0].shape == img.shape for img in images[1:]]):
+                    # print('WARNING from yolo module: Input images in batch are of diff sizes, the input size will take the first image in the batch, you will have to scale the output bounding boxes of those input image whose sizes differ from the first image yourself.')
                 # assert all([images[0].shape == img.shape for img in images[1:]]),'Network does not acccept images of different sizes. please speak to eugene.'
         elif isinstance(images, np.ndarray):
             images = [ images ]
@@ -676,7 +684,7 @@ if __name__ == '__main__':
     #     cv2.waitKey(0)
     # cv2.destroyAllWindows()
 
-    numstreams = 20
+    numstreams = 1
     bs = 8
 
     vp = '/media/dh/HDD/reid/street_looped.mp4'
@@ -684,8 +692,11 @@ if __name__ == '__main__':
     caps = []
     for _ in range(numstreams):
         caps.append(cv2.VideoCapture(vp))
-    yolo = YOLO(bgr=True, batch_size=bs)
+    yolo = YOLO(bgr=True, batch_size=bs, model_image_size=(736, 416))
+    # yolo = YOLO(bgr=True, batch_size=bs, model_image_size=(896, 896))
+    # yolo = YOLO(bgr=True, batch_size=bs, model_image_size=(896, 512))
 
+    frame_idx = 0
     while True:
         frames = []
         for cap in caps:
@@ -694,20 +705,22 @@ if __name__ == '__main__':
                 break
             frames.append(frame)
             # frames = [frame] * numstreams
-
-        tic = time.time()
-        all_dets = yolo.detect_get_box_in(frames, box_format='ltrb')
-        toc = time.time()
-        print('infer time:', toc-tic)
-        # for dets, im in zip(all_dets, frames):
-        im_show = frame.copy()
-        for det in all_dets[0]:
-            # print(det)
-            ltrb, conf, clsname = det
-            l,t,r,b = ltrb
-            cv2.rectangle(im_show, (int(l),int(t)),(int(r),int(b)), (255,255,0))
-            # print('{}:{}'.format(clsname, conf))
-        cv2.imshow('',im_show)
-        if cv2.waitKey(1) == ord('q'):
-            break
+        frame_idx += 1
+        if (frame_idx-1)%10:
+            tic = time.time()
+            all_dets = yolo.detect_get_box_in(frames, box_format='ltrb')
+            toc = time.time()
+            print('infer time:', toc-tic)
+            # for dets, im in zip(all_dets, frames):
+            im_show = frame.copy()
+            for det in all_dets[0]:
+                # print(det)
+                ltrb, conf, clsname = det
+                l,t,r,b = ltrb
+                cv2.rectangle(im_show, (int(l),int(t)),(int(r),int(b)), (255,255,0))
+                cv2.putText(im_show, '{:0.2f}'.format(conf), (l,b), cv2.FONT_HERSHEY_DUPLEX, fontScale=1, color=(255,255,0), lineType=2)
+                # print('{}:{}'.format(clsname, conf))
+            cv2.imshow('',im_show)
+            if cv2.waitKey(1) == ord('q'):
+                break
     cv2.destroyAllWindows()
