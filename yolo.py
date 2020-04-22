@@ -41,7 +41,7 @@ class YOLO(object):
         "score" : 0.5,
         "iou" : 0.45,
         "model_image_size" : (608, 608),
-        "input_image_size" : (1080, 1920), # Height, Width
+        # "input_image_size" : (1080, 1920), # Height, Width
         "gpu_num" : 1,
         "batch_size" : 1,
     }
@@ -85,7 +85,7 @@ class YOLO(object):
         print('Warming up...')
         self._detect_batch([warmup_image] * self.batch_size)
         print('YOLO warmed up!')
-        print('Input image size initialised as {}x{} (WxH)! Please give the appropriate argument inputs if this is wrong.'.format(self.input_image_size[1], self.input_image_size[0]))
+        # print('Input image size initialised as {}x{} (WxH)! Please give the appropriate argument inputs if this is wrong.'.format(self.input_image_size[1], self.input_image_size[0]))
 
     def _get_class(self):
         classes_path = os.path.expanduser(self.classes_path)
@@ -260,7 +260,8 @@ class YOLO(object):
             [self.boxes, self.scores, self.classes],
             feed_dict={
                 self.yolo_model.input: images_data,
-                self.input_image_shape: [self.input_image_size[0], self.input_image_size[1]], # height, width
+                self.input_image_shape: [images[0].shape[0], images[0].shape[1]], # height, width
+                # self.input_image_shape: [self.input_image_size[0], self.input_image_size[1]], # height, width
                 K.learning_phase(): 0
             })
         return out_boxes, out_scores, out_classes
@@ -632,64 +633,81 @@ def detect_video(yolo, video_path, output_path=""):
 
 if __name__ == '__main__':
     import cv2
-    yolo = YOLO(bgr=True, batch_size=1)
-    img = cv2.imread('/home/dh/Pictures/frisbee.jpg')
-    img2 = cv2.imread('/home/dh/Pictures/dog_two.jpg')
-    img2 = cv2.resize(img2, (img.shape[1], img.shape[0]))
-    img3 = cv2.imread('/home/dh/Pictures/puppy-dog.jpg')
-    img3 = cv2.resize(img3, (img.shape[1], img.shape[0]))
+    import time
+    # yolo = YOLO(bgr=True, batch_size=1)
+    
+    # img = cv2.imread('/home/dh/Pictures/frisbee.jpg')
+    # img2 = cv2.imread('/home/dh/Pictures/dog_two.jpg')
+    # img2 = cv2.resize(img2, (img.shape[1], img.shape[0]))
+    # img3 = cv2.imread('/home/dh/Pictures/puppy-dog.jpg')
+    # img3 = cv2.resize(img3, (img.shape[1], img.shape[0]))
 
-    img_batch = [img]
-    # img_batch = [img, img2]
-    # img_batch = [img, img2, img3]
+    # img_batch = [img]
+    # # img_batch = [img, img2]
+    # # img_batch = [img, img2, img3]
 
-    all_dets = yolo.detect_get_box_in(img_batch, box_format='ltrb')
-    # boxes, scores, classes = yolo._detect_batch(img_batch)
-    for dets, im in zip(all_dets, img_batch):
-        im_show = im.copy()
-        for det in dets:
-            # print(det)
-            ltrb, conf, clsname = det
-            l,t,r,b = ltrb
-            cv2.rectangle(im_show, (int(l),int(t)),(int(r),int(b)), (255,255,0))
-            print('{}:{}'.format(clsname, conf))
-        cv2.imshow('',im_show)
-        cv2.waitKey(0)
-    cv2.destroyAllWindows()
-    print('REDO with diff batch size')
-
-    img_batch = [img, img2, img3]
-    yolo.regenerate(batch_size=len(img_batch))
-    all_dets = yolo.detect_get_box_in(img_batch, box_format='ltrb')
-    for dets, im in zip(all_dets, img_batch):
-        im_show = im.copy()
-        for det in dets:
-            # print(det)
-            ltrb, conf, clsname = det
-            l,t,r,b = ltrb
-            cv2.rectangle(im_show, (int(l),int(t)),(int(r),int(b)), (255,255,0))
-            print('{}:{}'.format(clsname, conf))
-        cv2.imshow('',im_show)
-        cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
-
-    # for b,s,c, im in zip(boxes, scores, classes, img_batch):
-        
-    #     for box in b:
-    #         t,l,b,r = box
-    #         cv2.rectangle(im, (int(l),int(t)),(int(r),int(b)), (255,255,0))
-    #     cv2.imshow('',im)
+    # all_dets = yolo.detect_get_box_in(img_batch, box_format='ltrb')
+    # # boxes, scores, classes = yolo._detect_batch(img_batch)
+    # for dets, im in zip(all_dets, img_batch):
+    #     im_show = im.copy()
+    #     for det in dets:
+    #         # print(det)
+    #         ltrb, conf, clsname = det
+    #         l,t,r,b = ltrb
+    #         cv2.rectangle(im_show, (int(l),int(t)),(int(r),int(b)), (255,255,0))
+    #         print('{}:{}'.format(clsname, conf))
+    #     cv2.imshow('',im_show)
     #     cv2.waitKey(0)
+    # cv2.destroyAllWindows()
+    # print('REDO with diff batch size')
 
-    # print(a,b,c)
-    # print(a.shape,b.shape,c.shape)
-    # a,b,c = yolo._detect(img)
-    # print(a,b,c)
-    # print(a.shape,b.shape,c.shape)
-    # a,b,c = yolo._detect(img2)
-    # print(a,b,c)
-    # print(a.shape,b.shape,c.shape)
-    # a,b,c = yolo._detect(img3)
-    # print(a,b,c)
-    # print(a.shape,b.shape,c.shape)
+    # img_batch = [img, img2, img3]
+    # yolo.regenerate(batch_size=len(img_batch))
+    # all_dets = yolo.detect_get_box_in(img_batch, box_format='ltrb')
+    # for dets, im in zip(all_dets, img_batch):
+    #     im_show = im.copy()
+    #     for det in dets:
+    #         # print(det)
+    #         ltrb, conf, clsname = det
+    #         l,t,r,b = ltrb
+    #         cv2.rectangle(im_show, (int(l),int(t)),(int(r),int(b)), (255,255,0))
+    #         print('{}:{}'.format(clsname, conf))
+    #     cv2.imshow('',im_show)
+    #     cv2.waitKey(0)
+    # cv2.destroyAllWindows()
+
+    numstreams = 20
+    bs = 8
+
+    vp = '/media/dh/HDD/reid/street_looped.mp4'
+    cap = cv2.VideoCapture(vp)
+    caps = []
+    for _ in range(numstreams):
+        caps.append(cv2.VideoCapture(vp))
+    yolo = YOLO(bgr=True, batch_size=bs)
+
+    while True:
+        frames = []
+        for cap in caps:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frames.append(frame)
+            # frames = [frame] * numstreams
+
+        tic = time.time()
+        all_dets = yolo.detect_get_box_in(frames, box_format='ltrb')
+        toc = time.time()
+        print('infer time:', toc-tic)
+        # for dets, im in zip(all_dets, frames):
+        im_show = frame.copy()
+        for det in all_dets[0]:
+            # print(det)
+            ltrb, conf, clsname = det
+            l,t,r,b = ltrb
+            cv2.rectangle(im_show, (int(l),int(t)),(int(r),int(b)), (255,255,0))
+            # print('{}:{}'.format(clsname, conf))
+        cv2.imshow('',im_show)
+        if cv2.waitKey(1) == ord('q'):
+            break
+    cv2.destroyAllWindows()
