@@ -75,8 +75,8 @@ class YOLO(object):
         # config.gpu_options.allow_growth=True
         # config.gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_usage)
         self.gpu_device = gpu_device
-        os.environ["CUDA_VISIBLE_DEVICES"] = gpu_device
-        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_usage)
+        # os.environ["CUDA_VISIBLE_DEVICES"] = gpu_device
+        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_usage, visible_device_list = gpu_device)
         sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
         K.set_session(sess)
         self.sess = K.get_session()
