@@ -85,7 +85,8 @@ class YOLO(object):
         self.device = gpu_device
         # os.environ["CUDA_VISIBLE_DEVICES"] = gpu_device
         gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_usage)
-        sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options, log_device_placement=True, allow_soft_placement = True))
+        # sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options, log_device_placement=True, allow_soft_placement = True))
+        sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options, allow_soft_placement = True))
         K.set_session(sess)
         self.sess = K.get_session()
         self.boxes, self.scores, self.classes = self.generate(old=old)
