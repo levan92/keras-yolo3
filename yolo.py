@@ -54,14 +54,14 @@ class YOLO(object):
         else:
             return "Unrecognized attribute name '" + n + "'"
 
-    def __init__(self, bgr, pillow=False, gpu_usage = 0.5, old=False, gpu_device='0', **kwargs):
+    def __init__(self, bgr, pillow=False, gpu_usage = 0.5, old=False, gpu_device='cuda:0', **kwargs):
         '''
         Params
         ------
         - bgr : Boolean, signifying if the inputs is bgr or rgb (if you're using cv2.imread it's probably in BGR) 
         - pillow : Boolean, flag to give inputs in pillow format instead of ndarray-like, this will override bgr flag to False
         - batch_size : int, inference batch size (default = 1)
-        - gpu_device : str, string of index of gpu to use, for cpu use empty string
+        - gpu_device : str, device string from forms
         '''
         self.__dict__.update(self._defaults) # set up default values
         self.__dict__.update(kwargs) # and update with user overrides
@@ -74,15 +74,23 @@ class YOLO(object):
         # config = tf.ConfigProto()
         # config.gpu_options.allow_growth=True
         # config.gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_usage)
-        self.gpu_device = gpu_device
+        dev_splits = gpu_device.split(':')
+        dev = dev_splits[0]
+        if dev == 'cuda':
+            self.device_idx = dev_splits[-1]
+            self.device_str = "/device:GPU:{}".format(self.device_idx)
+        else: # cpu
+            self.device_idx = "-1"
+            self.device_str = "/device:CPU:0"
+        # self.gpu_device = gpu_device
         # os.environ["CUDA_VISIBLE_DEVICES"] = gpu_device
-        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_usage, visible_device_list = gpu_device)
-        sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=gpu_usage)
+        sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options, log_device_placement=True, allow_soft_placement = True))
         K.set_session(sess)
         self.sess = K.get_session()
         self.boxes, self.scores, self.classes = self.generate(old=old)
         self.graph = tf.get_default_graph()
-        print('Keras Yolov3 started at batch size of {} and confidence threshold of {}, using gpu device {}.'.format(self.batch_size, self.score, self.gpu_device))
+        print('Keras Yolov3 started at batch size of {} and confidence threshold of {}, using gpu device {}.'.format(self.batch_size, self.score, self.device_str))
         print('Model input size {}'.format(self.model_image_size))
         # self.boxes, self.scores, self.classes = self.generate()
         warmup_image = np.zeros((10,10,3), dtype='uint8')
@@ -116,16 +124,17 @@ class YOLO(object):
         num_anchors = len(self.anchors)
         num_classes = len(self.class_names)
         is_tiny_version = num_anchors==6 # default setting
-        try:
-            self.yolo_model = load_model(model_path, compile=False)
-        except:
-            self.yolo_model = tiny_yolo_body(Input(shape=(None,None,3)), num_anchors//2, num_classes) \
-                if is_tiny_version else yolo_body(Input(shape=(None,None,3)), num_anchors//3, num_classes)
-            self.yolo_model.load_weights(self.model_path) # make sure model, anchors and classes match
-        else:
-            assert self.yolo_model.layers[-1].output_shape[-1] == \
-                num_anchors/len(self.yolo_model.output) * (num_classes + 5), \
-                'Mismatch between model and given anchor and class sizes'
+        with tf.device(self.device_str):
+            try:
+                self.yolo_model = load_model(model_path, compile=False)
+            except:
+                self.yolo_model = tiny_yolo_body(Input(shape=(None,None,3)), num_anchors//2, num_classes) \
+                    if is_tiny_version else yolo_body(Input(shape=(None,None,3)), num_anchors//3, num_classes)
+                self.yolo_model.load_weights(self.model_path) # make sure model, anchors and classes match
+            else:
+                assert self.yolo_model.layers[-1].output_shape[-1] == \
+                    num_anchors/len(self.yolo_model.output) * (num_classes + 5), \
+                    'Mismatch between model and given anchor and class sizes'
 
         print('{} model, anchors, and classes loaded.'.format(model_path))
 
@@ -140,20 +149,22 @@ class YOLO(object):
         np.random.shuffle(self.colors)  # Shuffle colors to decorrelate adjacent classes.
         np.random.seed(None)  # Reset seed to default.
 
+        with tf.device(self.device_str):
         # Generate output tensor targets for filtered bounding boxes.
-        self.input_image_shape = K.placeholder(shape=(2, ))
+            self.input_image_shape = K.placeholder(shape=(2, ))
         if self.gpu_num>=2:
             self.yolo_model = multi_gpu_model(self.yolo_model, gpus=self.gpu_num)
 
-        if old:
-            print('using old yolo eval')
-            boxes, scores, classes = yolo_eval(self.yolo_model.output, self.anchors,
-                    len(self.class_names), self.input_image_shape,
-                    score_threshold=self.score, iou_threshold=self.iou)
-        else:
-            boxes, scores, classes = yolo_eval_batch(self.yolo_model.output, self.anchors,
-                    len(self.class_names), self.input_image_shape, self.batch_size,
-                    score_threshold=self.score, iou_threshold=self.iou)
+        with tf.device(self.device_str):
+            if old:
+                print('using old yolo eval')
+                boxes, scores, classes = yolo_eval(self.yolo_model.output, self.anchors,
+                        len(self.class_names), self.input_image_shape,
+                        score_threshold=self.score, iou_threshold=self.iou)
+            else:
+                boxes, scores, classes = yolo_eval_batch(self.yolo_model.output, self.anchors,
+                        len(self.class_names), self.input_image_shape, self.batch_size,
+                        score_threshold=self.score, iou_threshold=self.iou)
         return boxes, scores, classes
         # return boxes, scores, classes
 
