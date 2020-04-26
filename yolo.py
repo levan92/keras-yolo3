@@ -40,8 +40,8 @@ class YOLO(object):
         # "classes_path": os.path.join(KERAS_YOLO_DIR, 'model_data/PP_classes.txt'),
         "score" : 0.5,
         "iou" : 0.45,
-        # "model_image_size" : (512, 288), # Width, Height
-        "model_image_size" : (608, 608),# Width, Height
+        # "model_image_size" : (288, 512), # Height, Width
+        "model_image_size" : (608, 608),# Height, Width
         # "input_image_size" : (1080, 1920), # Height, Width
         "gpu_num" : 1,
         "batch_size" : 1,
@@ -91,15 +91,13 @@ class YOLO(object):
         self.sess = K.get_session()
         self.boxes, self.scores, self.classes = self.generate(old=old)
         self.graph = tf.get_default_graph()
-        print('Keras Yolov3 started at batch size of {} and confidence threshold of {}, using gpu device {}.'.format(self.batch_size, self.score, self.device_str))
+        print('Keras Yolov3 started at batch size of {} and confidence threshold of {}, using gpu device {}, bgr is {}, pillow is {}.'.format(self.batch_size, self.score, self.device_str, self.bgr, self.pillow))
         print('Model input size {}'.format(self.model_image_size))
         # self.boxes, self.scores, self.classes = self.generate()
-        warmup_image = np.zeros((10,10,3), dtype='uint8')
-        # warmup_image = Image.fromarray(np.zeros((10,10,3), dtype='uint8'))
-        # self._detect(warmup_image)
-        # self._detect([warmup_image, warmup_image])
+        warmup_height, warmup_width = self.model_image_size # Height, Width
+        warmup_image = np.zeros((warmup_height,warmup_width,3), dtype='uint8')
         print('Warming up...')
-        self._detect_batch([warmup_image] * self.batch_size)
+        self._detect_batch([warmup_image] * self.batch_size, warmup_width, warmup_height)
         print('YOLO warmed up!')
         # print('Input image size initialised as {}x{} (WxH)! Please give the appropriate argument inputs if this is wrong.'.format(self.input_image_size[1], self.input_image_size[0]))
 
@@ -202,9 +200,11 @@ class YOLO(object):
         if batch_size == self.batch_size:
             return
         self._refresh(batch_size)
-        warmup_image = np.zeros((10,10,3), dtype='uint8')
+        warmup_height, warmup_width = self.model_image_size # Height, Width
+
+        warmup_image = np.zeros((warmup_height,warmup_width,3), dtype='uint8')
         print('Warming up...')
-        self._detect_batch([warmup_image] * self.batch_size)
+        self._detect_batch([warmup_image] * self.batch_size, warmup_width, warmup_height)
         print('YOLO warmed up!')
 
     def _preprocess(self, image, expand=True):
@@ -218,10 +218,11 @@ class YOLO(object):
         -------
         ndarray-like
         '''
-
-        if not self.pillow:
+        if isinstance(image, np.ndarray):
             if self.bgr: image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             image = Image.fromarray( image )
+        else:
+            assert isinstance(image, Image.Image),'image not a PIL.Image.Image!'        
         
         if self.model_image_size != (None, None):
             assert self.model_image_size[0]%32 == 0, 'Multiples of 32 required'
@@ -250,19 +251,21 @@ class YOLO(object):
 
     def _preprocess_batch(self, images):
         # images_data = np.array( [self._preprocess(image) for image in images] )
-        images_data = np.zeros((len(images),*self.model_image_size,images[0].shape[-1]))
+        images_data = np.zeros((len(images),*self.model_image_size,3))
         for i, image in enumerate(images):
             if image is not None:
                 images_data[i] = self._preprocess( image, expand=False )
         return images_data
 
-    def _detect_batch(self, images):
+    def _detect_batch(self, images, im_width, im_height):
         '''
         detect function 
 
         Params
         ------
         images : list of ndarrays
+        im_width : width of image
+        im_height : height of image
 
         '''
         if len( images ) <= 0:
@@ -280,7 +283,8 @@ class YOLO(object):
                 [self.boxes, self.scores, self.classes],
                 feed_dict={
                     self.yolo_model.input: images_data,
-                    self.input_image_shape: [images[0].shape[0], images[0].shape[1]], # height, width
+                    self.input_image_shape: [im_height, im_width], # height, width
+                    # self.input_image_shape: [images[0].shape[0], images[0].shape[1]], # height, width
                     # self.input_image_shape: [self.input_image_size[0], self.input_image_size[1]], # height, width
                     K.learning_phase(): 0
                 })
@@ -321,7 +325,12 @@ class YOLO(object):
         elif isinstance(images, np.ndarray):
             images = [ images ]
             no_batch = True
-        im_height, im_width = images[0].shape[:2]
+        
+        if isinstance(images[0], np.ndarray):
+            im_height, im_width = images[0].shape[:2]
+        else:
+            assert isinstance(images[0], Image.Image)
+            im_width, im_height = images[0].size
 
         # import time
         # tic = time.time()
@@ -333,7 +342,7 @@ class YOLO(object):
             to_ = min(len(images),i*self.batch_size+self.batch_size)
             n = to_ - from_ 
             # print('Inferencing {} images'.format(n))
-            out_boxes, out_scores, out_classes = self._detect_batch(images[from_:to_])
+            out_boxes, out_scores, out_classes = self._detect_batch(images[from_:to_],im_width, im_height)
             all_out_boxes.extend(out_boxes[:n])
             all_out_scores.extend(out_scores[:n])
             all_out_classes.extend(out_classes[:n])
