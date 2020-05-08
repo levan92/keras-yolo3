@@ -705,43 +705,48 @@ if __name__ == '__main__':
     #     cv2.waitKey(0)
     # cv2.destroyAllWindows()
 
-    numstreams = 1
-    bs = 8
-
-    vp = '/media/dh/HDD/reid/street_looped.mp4'
-    cap = cv2.VideoCapture(vp)
-    caps = []
-    for _ in range(numstreams):
-        caps.append(cv2.VideoCapture(vp))
-    yolo = YOLO(bgr=True, batch_size=bs, model_image_size=(736, 416))
+    # numstreams = 1
+    ip = 'test.jpg'
+    img = cv2.imread(ip)
+    # vp = '/media/dh/HDD/reid/street_looped.mp4'
+    # cap = cv2.VideoCapture(vp)
+    # caps = []
+    # for _ in range(numstreams):
+    #     caps.append(cv2.VideoCapture(vp))
+    
+    bs = 1
+    imgs = [ img for _ in range(bs)]
+    yolo = YOLO(bgr=True, batch_size=bs, model_image_size=(608, 608))
     # yolo = YOLO(bgr=True, batch_size=bs, model_image_size=(896, 896))
     # yolo = YOLO(bgr=True, batch_size=bs, model_image_size=(896, 512))
 
-    frame_idx = 0
-    while True:
-        frames = []
-        for cap in caps:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            frames.append(frame)
-            # frames = [frame] * numstreams
-        frame_idx += 1
-        if (frame_idx-1)%10:
-            tic = time.time()
-            all_dets = yolo.detect_get_box_in(frames, box_format='ltrb')
-            toc = time.time()
-            print('infer time:', toc-tic)
+    # frame_idx = 0
+    # while True:
+    #     frames = []
+    #     for cap in caps:
+    #         ret, frame = cap.read()
+    #         if not ret:
+    #             break
+    #         frames.append(frame)
+    #         # frames = [frame] * numstreams
+    #     frame_idx += 1
+    #     if (frame_idx-1)%10:
+    tic = time.perf_counter()
+    all_dets = yolo.detect_get_box_in(imgs, box_format='ltrb')
+    toc = time.perf_counter()
+    print('infer time:', toc-tic)
             # for dets, im in zip(all_dets, frames):
-            im_show = frame.copy()
-            for det in all_dets[0]:
-                # print(det)
-                ltrb, conf, clsname = det
-                l,t,r,b = ltrb
-                cv2.rectangle(im_show, (int(l),int(t)),(int(r),int(b)), (255,255,0))
-                cv2.putText(im_show, '{:0.2f}'.format(conf), (l,b), cv2.FONT_HERSHEY_DUPLEX, fontScale=1, color=(255,255,0), lineType=2)
-                # print('{}:{}'.format(clsname, conf))
-            cv2.imshow('',im_show)
-            if cv2.waitKey(1) == ord('q'):
-                break
-    cv2.destroyAllWindows()
+            # im_show = frame.copy()
+    im_show = img.copy()
+    for det in all_dets[0]:
+        # print(det)
+        ltrb, conf, clsname = det
+        l,t,r,b = ltrb
+        cv2.rectangle(im_show, (int(l),int(t)),(int(r),int(b)), (255,255,0))
+        cv2.putText(im_show, '{:0.2f}'.format(conf), (l,b), cv2.FONT_HERSHEY_DUPLEX, fontScale=1, color=(255,255,0), lineType=2)
+        # print('{}:{}'.format(clsname, conf))
+    cv2.imwrite('test_out.jpg', im_show)
+    #         cv2.imshow('',im_show)
+    #         if cv2.waitKey(1) == ord('q'):
+    #             break
+    # cv2.destroyAllWindows()
