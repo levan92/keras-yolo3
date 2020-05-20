@@ -23,5 +23,8 @@ python convert.py yolov3.cfg yolov3.weights model_data/yolo.h5
 
 - There are many methods in the class due to different projects needing it and legacy reasons, but the main method to use is `detect_get_box_in` where you give a list of ndarray-like images and can specify the format you want the BBs back in.  
 
+## Example usage
+Take a look at `example_video.py` on how I will use it on a video
+
 ## Details
 This implementation is special/weird in the sense that while the inference is in Keras, but the preprocessing is done with tensorflow aka computation graphs.  
