@@ -34,7 +34,10 @@ while True:
     if not ret:
         break
     # Inference
+    tic = time.perf_counter()
     dets = yolo.detect_get_box_in([frame], box_format='ltrb')
+    toc = time.perf_counter()
+    print('infer duration: {:0.3f}s'.format(toc-tic))
     dets = dets[0]
 
     # Drawing
